@@ -15,6 +15,7 @@ typedef struct {
     int sw;
 }CCMD_PARAM;
 static CDS_BRTREE params;
+static CDS_VECTOR funcs;
 
 static int cmp_str(const void *k1,const void *k2){
     const char *kw1=k1,*kw2=k2;
@@ -29,6 +30,7 @@ void ccmd_init(int c,const char **v){
     argc=c;
     argv=v;
     cds_brtree_init(&params,cmp_str,equal_str);
+    cds_vector_init(&funcs,sizeof(CCMD_FUNC));
 }
 
 void ccmd_set_para(const char *sw,int flg,void *data){
@@ -72,6 +74,8 @@ inline static int find_required(struct CDS_BSTREE_NODE *node){
     }
     return l+r+k;
 }
+
+
 
 int ccmd_deal(int exit){
     struct CDS_BSTREE_NODE **nd;
@@ -122,7 +126,7 @@ int ccmd_deal(int exit){
                 node->real_size=vec.real_size;
                 node->sw=1;
                 if(node->flg&CCMD_FUNCTION){
-                    ((CCMD_FUNC)node->data)();
+                    cds_vector_push_back(&funcs,&node->data,sizeof(CCMD_FUNC));
                 }
             }
             vec.data=(*(void**)node->data);
@@ -142,7 +146,7 @@ int ccmd_deal(int exit){
             (*(int*)cds_vector_at(&vec,0,stride))++;
         }else{
             if(node->sw){
-                printf("%s:[%s]:this switch is used many times.\n",argv[0],key);
+                printf("%s:[%s]:this switch is used too many times.\n",argv[0],key);
                 if(exit){
                     return 1;
                 }
@@ -151,20 +155,26 @@ int ccmd_deal(int exit){
             }
             node->sw=1;
             if(node->flg&CCMD_STR_PARAM){
-                (*(char**)node->data)=&key[var];
+                (*(char**)node->data)=(char*)argv[i]+(&key[var]-buf);
             }else if(node->flg&CCMD_INT_PARAM){
                 (*(int*)node->data)=str_to_int(&key[var]);
             }
             if(node->flg&CCMD_FUNCTION){
-                ((CCMD_FUNC)node->data)();
+                cds_vector_push_back(&funcs,&node->data,sizeof(CCMD_FUNC));
             }
         }
     }
     int r=find_required((struct CDS_BSTREE_NODE*)params.root);
     if(r){
         printf("%s:%d param be not defined.\n",argv[0],r);
+        errn+=r;
+        return errn;
     }
-    errn+=r;
+
+    for(register size_t i=0;i<funcs.size;i++){
+        (*(CCMD_FUNC*)cds_vector_at(&funcs,i,sizeof(CCMD_FUNC)))();
+    }
+    
     return errn;
 }
 
@@ -208,4 +218,5 @@ static void close_node(void *v){
 }
 void ccmd_close(void){
     cds_brtree_close(&params,NULL,(CDS_CLOSE_FUNC)close_node);
+    cds_vector_close(&funcs,NULL,sizeof(CCMD_FUNC));
 }
