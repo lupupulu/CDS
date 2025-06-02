@@ -158,9 +158,10 @@ int ccmd_deal(int exit){
                 (*(char**)node->data)=(char*)argv[i]+(&key[var]-buf);
             }else if(node->flg&CCMD_INT_PARAM){
                 (*(int*)node->data)=str_to_int(&key[var]);
-            }
-            if(node->flg&CCMD_FUNCTION){
+            }else if(node->flg&CCMD_FUNCTION){
                 cds_vector_push_back(&funcs,&node->data,sizeof(CCMD_FUNC));
+            }else{
+                (*(int*)node->data)=1;
             }
         }
     }
