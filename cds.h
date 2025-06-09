@@ -27,6 +27,7 @@ void cds_print_string(const void *a);
     inline static void cds_print_int_##num(const void *a)\
     {char print[num+1];memset(print,0,sizeof(print));register int n=*(const int*)a;for(register int i=num-1;i>=0;i--){print[i]=n%10+'0';n/=10;}printf(print);}
 
+void cds_swap(void *a,void *b,size_t size);
 
 typedef struct{
     unsigned char *data;
@@ -78,13 +79,31 @@ typedef struct{
 void cds_queue_init(CDS_QUEUE *q);
 void cds_queue_push(CDS_QUEUE *q,const void *data,size_t data_size);
 void cds_queue_pop(CDS_QUEUE *q,CDS_CLOSE_FUNC func);
-void*cds_queue_front(CDS_QUEUE *q);
+void *cds_queue_front(CDS_QUEUE *q);
 #define cds_queue_at(q,n,t) cds_queue_front(q)
 int cds_queue_empty(CDS_QUEUE *q);
 void cds_queue_close(CDS_QUEUE *q,CDS_CLOSE_FUNC func);
 void cds_queue_print(CDS_QUEUE *q,CDS_PRINT_FUNC func);
 
 
+
+struct CDS_HEAP_NODE{
+    void *key;
+    void *value;
+};
+typedef struct{
+    CDS_VECTOR data;
+    CDS_COMPARE_FUNC cmp;
+}CDS_HEAP;
+
+
+void cds_heap_init(CDS_HEAP *heap,CDS_COMPARE_FUNC cmp);
+void cds_heap_push(CDS_HEAP *heap,void *key,size_t key_size,void *value,size_t value_size);
+void cds_heap_pop(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f);
+struct CDS_HEAP_NODE *cds_heap_front(CDS_HEAP *heap);
+#define cds_heap_at(h,n,t) cds_heap_front(q)
+int cds_heap_empty(CDS_HEAP *heap);
+void cds_heap_close(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f);
 
 
 
