@@ -35,6 +35,13 @@ void cds_print_string(const void *a){
     printf(a);
 }
 
+void cds_swap(void *a,void *b,size_t size){
+    void *swap=malloc(size);
+    memcpy(swap,a,size);
+    memcpy(a,b,size);
+    memcpy(b,swap,size);
+}
+
 #define ABS(a) ((a)>0?(a):-(a))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 
@@ -200,6 +207,101 @@ void cds_queue_close(CDS_QUEUE *q,CDS_CLOSE_FUNC func){
 }
 void cds_queue_print(CDS_QUEUE *q,CDS_PRINT_FUNC func){
     cds_link_print(&q->linked,func);
+}
+
+
+void cds_heap_init(CDS_HEAP *heap,CDS_COMPARE_FUNC cmp){
+    cds_vector_init(&heap->data,sizeof(struct CDS_HEAP_NODE));
+    heap->cmp=cmp;
+}
+inline static void cds_heap_node_swap(struct CDS_HEAP_NODE *a,struct CDS_HEAP_NODE *b){
+    struct CDS_HEAP_NODE swap={.key=a->key,.value=a->value};
+    a->key=b->key;
+    a->value=b->value;
+    b->key=swap.key;
+    b->value=swap.value;
+}
+void cds_heap_push(CDS_HEAP *heap,void *key,size_t key_size,void *value,size_t value_size){
+    struct CDS_HEAP_NODE node;
+    node.key=malloc(key_size);
+    memcpy(node.key,key,key_size);
+    node.value=malloc(value_size);
+    memcpy(node.value,value,value_size);
+    cds_vector_push_back(&heap->data,&node,sizeof(node));
+    size_t l=heap->data.size,i=0;
+    struct CDS_HEAP_NODE *now,*last;
+    while(l!=1){
+        if(l%2){
+            i=(l-1)/2;
+        }else{
+            i=l/2;
+        }
+        last=cds_vector_at(&heap->data,l-1,sizeof(struct CDS_HEAP_NODE));
+        now=cds_vector_at(&heap->data,i-1,sizeof(struct CDS_HEAP_NODE));
+        if(heap->cmp(now->key,last->key)){
+            cds_heap_node_swap(now,last);
+        }
+        l=i;
+    }
+}
+static CDS_CLOSE_FUNC cds_heap_key_close_f,cds_heap_value_close_f;
+static void cds_heap_node_close_func(const void *p){
+    struct CDS_HEAP_NODE *node=(void*)p;
+    if(cds_heap_key_close_f){
+        cds_heap_key_close_f(node->key);
+    }
+    if(cds_heap_value_close_f){
+        cds_heap_value_close_f(node->value);
+    }
+}
+void cds_heap_pop(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
+    struct CDS_HEAP_NODE *last,*nowl,*nowr,*nowj;
+    last=cds_vector_at(&heap->data,0,sizeof(struct CDS_HEAP_NODE));
+    nowl=cds_vector_at(&heap->data,heap->data.size-1,sizeof(struct CDS_HEAP_NODE));
+    cds_heap_node_swap(last,nowl);
+    cds_heap_key_close_f=key_f;
+    cds_heap_value_close_f=value_f;
+    cds_vector_pop_back(&heap->data,cds_heap_node_close_func,sizeof(struct CDS_HEAP_NODE));
+    size_t lt=1,l,r,j;
+    while(lt*2<=heap->data.size&&lt){
+        last=nowl=cds_vector_at(&heap->data,lt-1,sizeof(struct CDS_HEAP_NODE));
+        l=lt*2;
+        nowl=cds_vector_at(&heap->data,l-1,sizeof(struct CDS_HEAP_NODE));
+        if(lt*2+1<=heap->data.size){
+            r=lt*2+1;
+        }else{
+            if(heap->cmp(last->key,nowl->key)){
+                cds_heap_node_swap(nowl,last);
+            }
+            break;
+        }
+        nowr=cds_vector_at(&heap->data,r-1,sizeof(struct CDS_HEAP_NODE));
+        if(heap->cmp(nowl->key,nowr->key)){
+            j=r;
+            nowj=nowr;
+        }else{
+            j=l;
+            nowj=nowl;
+        }
+        if(heap->cmp(last->key,nowj->key)){
+            cds_heap_node_swap(last,nowj);
+        }
+        lt=j;
+    }
+}
+struct CDS_HEAP_NODE *cds_heap_front(CDS_HEAP *heap){
+    return (struct CDS_HEAP_NODE *)heap->data.data;
+}
+int cds_heap_empty(CDS_HEAP *heap){
+    if(!heap->data.size){
+        return 1;
+    }
+    return 0;
+}
+void cds_heap_close(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
+    cds_heap_key_close_f=key_f;
+    cds_heap_value_close_f=value_f;
+    cds_vector_close(&heap->data,cds_heap_key_close_f,sizeof(struct CDS_HEAP_NODE));
 }
 
 
