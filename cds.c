@@ -124,7 +124,7 @@ void cds_link_init(CDS_LINK *a){
 }
 
 void*cds_link_at(CDS_LINK *a,size_t n,size_t foot){
-    return cds_link_get(&a->head,n);
+    return cds_link_get(&a->head,n)->data;
 }
 
 void cds_link_push(struct CDS_LINK_NODE *node,const void *data,size_t data_size){
@@ -150,12 +150,9 @@ void cds_link_delete(struct CDS_LINK_NODE *node,CDS_CLOSE_FUNC func){
 
 struct CDS_LINK_NODE *cds_link_get(struct CDS_LINK_NODE *node,size_t n){
     struct CDS_LINK_NODE *now=node;
-    if(!now->next){
-        return NULL;
-    }
     for(register size_t i=0;i<n;i++){
-        if(!now->next){
-            return NULL;
+        if(!now){
+            break;
         }
         now=now->next;
     }
@@ -175,6 +172,114 @@ void cds_link_print(CDS_LINK *a,CDS_PRINT_FUNC func){
         printf(" ");
         now=now->next;
     }
+    printf("\n");
+}
+
+void cds_doublylink_init(CDS_DOUBLYLINK *a){
+    a->head.data=NULL;
+    a->head.last=NULL;
+    a->head.next=NULL;
+}
+void*cds_doublylink_at(CDS_DOUBLYLINK *a,size_t n,size_t foot){
+    return cds_doublylink_get(&a->head,n)->data;
+}
+void cds_doublylink_push(struct CDS_DOUBLYLINK_NODE *node,const void *data,size_t data_size){
+    struct CDS_DOUBLYLINK_NODE *new=malloc(sizeof(struct CDS_DOUBLYLINK_NODE));
+    new->data=malloc(data_size);
+    memcpy(new->data,data,data_size);
+    new->next=node->next;
+    new->last=node;
+
+    if(node->next){
+        node->next->last=new;
+    }
+    node->next=new;
+}
+void cds_doublylink_push_before(struct CDS_DOUBLYLINK_NODE *node,const void *data,size_t data_size){
+    struct CDS_DOUBLYLINK_NODE *new=malloc(sizeof(struct CDS_DOUBLYLINK_NODE));
+    new->data=malloc(data_size);
+    memcpy(new->data,data,data_size);
+    new->next=node;
+    new->last=node->last;
+
+    if(node->last){
+        node->last->next=new;
+    }
+    node->last=new;
+}
+void cds_doublylink_delete(struct CDS_DOUBLYLINK_NODE *node,CDS_CLOSE_FUNC func){
+    if(!node->next){
+        return ;
+    }
+    struct CDS_DOUBLYLINK_NODE *next=node->next;
+    node->next=node->next->next;
+    if(node->next){
+        node->next->last=node;
+    }
+    if(func){
+        func(next->data);
+    }
+    free(next->data);
+    free(next);
+}
+void cds_doublylink_delete_before(struct CDS_DOUBLYLINK_NODE *node,CDS_CLOSE_FUNC func){
+    if(!node->last){
+        return ;
+    }
+    struct CDS_DOUBLYLINK_NODE *last=node->last;
+    node->last=node->last->last;
+    if(node->last){
+        node->last->next=node;
+    }
+    if(func){
+        func(last->data);
+    }
+    free(last->data);
+    free(last);
+}
+struct CDS_DOUBLYLINK_NODE *cds_doublylink_get(struct CDS_DOUBLYLINK_NODE *node,long long n){
+    register int s=0;
+    if(n<0){
+        s=1;
+        n=-n;
+    }
+    struct CDS_DOUBLYLINK_NODE *now=node;
+    for(register long long i=0;i<n;i++){
+        if(!now){
+            break;
+        }
+        if(s){
+            now=now->next;
+        }else{
+            now=now->last;
+        }
+    }
+    return now;
+}
+void cds_doublylink_close(CDS_DOUBLYLINK *a,CDS_CLOSE_FUNC func){
+    while(a->head.last){
+        cds_doublylink_delete_before(&a->head,func);
+    }
+    while(a->head.next){
+        cds_doublylink_delete(&a->head,func);
+    }
+}
+void cds_doublylink_print(CDS_DOUBLYLINK *a,CDS_PRINT_FUNC func){
+    printf("last:");
+    struct CDS_DOUBLYLINK_NODE *now=a->head.last;
+    while(now){
+        func(now->data);
+        printf(" ");
+        now=now->last;
+    }
+    now=a->head.next;
+    printf("\nnext:");
+    while(now){
+        func(now->data);
+        printf(" ");
+        now=now->next;
+    }
+    printf("\n");
 }
 
 
@@ -738,10 +843,9 @@ void cds_avltree_close(CDS_AVLTREE *t,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_
 #define CDS_BRTREE_BLACK 0
 #define CDS_BRTREE_RED   1
 
-inline static void cds_brtree_rotate_left(struct CDS_BRTREE_NODE** nd){
-    struct CDS_BRTREE_NODE* r=(*nd)->r;
+inline static void cds_brtree_rotate_left(struct CDS_BRTREE_NODE **nd){
+    struct CDS_BRTREE_NODE *r=(*nd)->r;
     
-    // 更新父指针
     r->parent=(*nd)->parent;
     (*nd)->parent=r;
     
@@ -756,40 +860,36 @@ inline static void cds_brtree_rotate_left(struct CDS_BRTREE_NODE** nd){
     *nd=r;
 }
 
-inline static void cds_brtree_rotate_right(struct CDS_BRTREE_NODE** nd){
-    struct CDS_BRTREE_NODE* l=(*nd)->l;
+inline static void cds_brtree_rotate_right(struct CDS_BRTREE_NODE **nd){
+    struct CDS_BRTREE_NODE *l=(*nd)->l;
     
-    // 更新父指针
     l->parent=(*nd)->parent;
     (*nd)->parent=l;
     
-    // 调整子树连接
     (*nd)->l=l->r;
     if(l->r){
         l->r->parent=*nd;
     }
     l->r=*nd;
     
-    // 颜色调整
     l->color=(*nd)->color;
     (*nd)->color=CDS_BRTREE_RED;
     
-    // 更新节点指针
     *nd=l;
 }
 
 
-inline static void cds_brtree_flip_color(struct CDS_BRTREE_NODE* nd){
+inline static void cds_brtree_flip_color(struct CDS_BRTREE_NODE *nd){
     nd->color=!nd->color;
     nd->l->color=!nd->l->color;
     nd->r->color=!nd->r->color;
 }
 
-inline static int cds_brtree_is_red(struct CDS_BRTREE_NODE* nd){
+inline static int cds_brtree_is_red(struct CDS_BRTREE_NODE *nd){
     return nd&&nd->color==CDS_BRTREE_RED;
 }
 
-inline static void cds_brtree_fix_insert(struct CDS_BRTREE_NODE** nd){
+inline static void cds_brtree_fix_insert(struct CDS_BRTREE_NODE **nd){
     if(cds_brtree_is_red((*nd)->r)&&!cds_brtree_is_red((*nd)->l)){
         cds_brtree_rotate_left(nd);
     }
@@ -821,13 +921,12 @@ void cds_brtree_init(CDS_BRTREE *t,CDS_COMPARE_FUNC cmp,CDS_COMPARE_FUNC equal){
     t->root=NULL;
 }
 
-inline static void cds_brtree_insert_recursion(struct CDS_BRTREE_NODE** nd,CDS_COMPARE_FUNC cmp,void* key,void* value,unsigned value_size,struct CDS_BRTREE_NODE *p){
+inline static void cds_brtree_insert_recursion(struct CDS_BRTREE_NODE **nd,CDS_COMPARE_FUNC cmp,void *key,void *value,unsigned value_size,struct CDS_BRTREE_NODE *p){
     if(!*nd){
         cds_brtree_make_node(nd,key,value,value_size,p);
         return;
     }
 
-    // 处理重复键
     if(cds_equal_int(key,(*nd)->key)){
         return;
     }
@@ -840,19 +939,18 @@ inline static void cds_brtree_insert_recursion(struct CDS_BRTREE_NODE** nd,CDS_C
     
     cds_brtree_fix_insert(nd);
 }
-void cds_brtree_insert(CDS_BRTREE* t,void* key,unsigned key_size,void* value,unsigned value_size){
-    void* _key=malloc(key_size);
+void cds_brtree_insert(CDS_BRTREE *t,void *key,unsigned key_size,void *value,unsigned value_size){
+    void *_key=malloc(key_size);
     memcpy(_key,key,key_size);
     cds_brtree_insert_recursion(&t->root,t->cmp,_key,value,value_size,NULL);
     t->root->color=CDS_BRTREE_BLACK;
 }
 
-inline static void cds_brtree_fix_delete(struct CDS_BRTREE_NODE** node){
+inline static void cds_brtree_fix_delete(struct CDS_BRTREE_NODE **node){
     while(*node&&(*node)->color==CDS_BRTREE_BLACK){
-        struct CDS_BRTREE_NODE* sibling;
+        struct CDS_BRTREE_NODE *sibling;
         
         if(node==&(*node)->parent->l){
-            /* 左子树处理 */
             sibling=(*node)->parent->r;
             if(cds_brtree_is_red(sibling)){
                 sibling->color=CDS_BRTREE_BLACK;
@@ -877,7 +975,6 @@ inline static void cds_brtree_fix_delete(struct CDS_BRTREE_NODE** node){
                 node=&(*node)->parent;
             }
         }else{
-            /* 右子树处理 */
             sibling=(*node)->parent->l;
             if(cds_brtree_is_red(sibling)){
                 sibling->color=CDS_BRTREE_BLACK;
@@ -903,12 +1000,14 @@ inline static void cds_brtree_fix_delete(struct CDS_BRTREE_NODE** node){
             }
         }
     }
-    if(*node)(*node)->color=CDS_BRTREE_BLACK;
+    if(*node){
+        (*node)->color=CDS_BRTREE_BLACK;
+    }
 }
 
-void cds_brtree_delete(struct CDS_BRTREE_NODE** node){
-    struct CDS_BRTREE_NODE* nd=*node;
-    struct CDS_BRTREE_NODE* child;
+void cds_brtree_delete(struct CDS_BRTREE_NODE **node){
+    struct CDS_BRTREE_NODE *nd=*node;
+    struct CDS_BRTREE_NODE *child;
     int original_color=nd->color;
 
     if(!nd->l){
@@ -920,7 +1019,7 @@ void cds_brtree_delete(struct CDS_BRTREE_NODE** node){
         *node=child;
         if(child)child->parent=nd->parent;
     }else{
-        struct CDS_BRTREE_NODE** max=&nd->l;
+        struct CDS_BRTREE_NODE **max=&nd->l;
         while((*max)->r)max=&(*max)->r;
         original_color=(*max)->color;
         child=(*max)->l;
@@ -942,8 +1041,10 @@ void cds_brtree_delete(struct CDS_BRTREE_NODE** node){
     }
 }
 
-inline static void cds_brtree_close_recursion(struct CDS_BRTREE_NODE* node,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
-    if(!node)return;
+inline static void cds_brtree_close_recursion(struct CDS_BRTREE_NODE *node,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
+    if(!node){
+        return;
+    }
     cds_brtree_close_recursion(node->l,key_f,value_f);
     cds_brtree_close_recursion(node->r,key_f,value_f);
     if(key_f){
@@ -957,7 +1058,7 @@ inline static void cds_brtree_close_recursion(struct CDS_BRTREE_NODE* node,CDS_C
     free(node);
 }
 
-void cds_brtree_close(CDS_BRTREE* t,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
+void cds_brtree_close(CDS_BRTREE *t,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
     cds_brtree_close_recursion(t->root,key_f,value_f);
     t->root=NULL;
 }
