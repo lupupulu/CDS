@@ -70,6 +70,25 @@ struct CDS_LINK_NODE *cds_link_get(struct CDS_LINK_NODE *node,size_t n);
 void cds_link_close(CDS_LINK *a,CDS_CLOSE_FUNC func);
 void cds_link_print(CDS_LINK *a,CDS_PRINT_FUNC func);
 
+struct CDS_DOUBLYLINK_NODE{
+    struct CDS_DOUBLYLINK_NODE *next;
+    unsigned char *data;
+    struct CDS_DOUBLYLINK_NODE *last;
+};
+typedef struct{
+    struct CDS_DOUBLYLINK_NODE head;
+}CDS_DOUBLYLINK;//Doubly linked list
+#define CDS_DOUBLYLINK(tp) CDS_DOUBLYLINK
+void cds_doublylink_init(CDS_DOUBLYLINK *a);
+void*cds_doublylink_at(CDS_DOUBLYLINK *a,size_t n,size_t foot);
+void cds_doublylink_push(struct CDS_DOUBLYLINK_NODE *node,const void *data,size_t data_size);
+void cds_doublylink_push_before(struct CDS_DOUBLYLINK_NODE *node,const void *data,size_t data_size);
+void cds_doublylink_delete(struct CDS_DOUBLYLINK_NODE *node,CDS_CLOSE_FUNC func);
+void cds_doublylink_delete_before(struct CDS_DOUBLYLINK_NODE *node,CDS_CLOSE_FUNC func);
+struct CDS_DOUBLYLINK_NODE *cds_doublylink_get(struct CDS_DOUBLYLINK_NODE *node,long long n);
+void cds_doublylink_close(CDS_DOUBLYLINK *a,CDS_CLOSE_FUNC func);
+void cds_doublylink_print(CDS_DOUBLYLINK *a,CDS_PRINT_FUNC func);
+
 typedef struct{
     CDS_LINK linked;
     struct CDS_LINK_NODE *last;
