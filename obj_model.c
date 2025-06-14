@@ -404,7 +404,7 @@ OBJ_MODEL *obj_load(const char *filename,size_t *n,OBJ_MTL_ARR *mtl){
                 buf2buf(&model_buf,&mesh_buf);
             }
             fscanf(fp,"%s",buf);
-            mesh_buf.s=malloc(strlen(buf)+1); // +1为终止符
+            mesh_buf.s=malloc(strlen(buf)+1);
             strcpy(mesh_buf.s,buf);
             break;
         case KW_G:
@@ -417,9 +417,12 @@ OBJ_MODEL *obj_load(const char *filename,size_t *n,OBJ_MTL_ARR *mtl){
             break;
         case KW_O:
             if(model.name){
+                buf2buf(&model_buf,&mesh_buf);
+                model.groups=(OBJ_MESH *)model_buf.data;
+                model.n=model_buf.size;
                 cds_vector_push_back(&models,&model,sizeof(model));
+                cds_vector_init(&model_buf,sizeof(OBJ_MESH));
             }
-
             fscanf(fp,"%s",buf);
             model.name=malloc(strlen(buf)+1);
             break;
