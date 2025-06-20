@@ -41,27 +41,34 @@ void ccmd_set_para(const char *sw,int flg,void *data){
     cds_brtree_insert(&params,(char*)sw,strlen(sw)+1,&p,sizeof(CCMD_PARAM));
 }
 
-inline static int str_to_int(const char *str){
-    int r=0,l=strlen(str);
+inline static int str_to_int(const char *str,int *r){
+    int l=strlen(str);
+    *r=0;
     for(int i=0;i<l;i++){
-        r*=10;
-        r+=str[i]-'0';
+        if(str[i]<'0'||str[i]>'9'){
+            *r=0;
+            return 1;
+        }
+        *r*=10;
+        *r+=str[i]-'0';
     }
-    return r;
+    return 0;
 }
 
-inline static int find_required(struct CDS_BSTREE_NODE *node){
-    int l=0,r=0,k=0;
+inline static void find_required(struct CDS_BSTREE_NODE *node,int *times){
     if(node->l){
-        l=find_required(node->l);
+        find_required(node->l,times);
     }
     if(node->r){
-        r=find_required(node->r);
+        find_required(node->r,times);
     }
     CCMD_PARAM *para=(CCMD_PARAM*)(node->data);
     if(!(para->flg&CCMD_OPTIONAL)&&!para->sw){
+        if(!(*times)){
+            printf("%s:\n",argv[0]);
+        }
         printf("    [%s]:is not defined.\n",node->key);
-        k++;
+        (*times)++;
     }
     CDS_VECTOR vec;
     void *i=NULL;
@@ -72,14 +79,14 @@ inline static int find_required(struct CDS_BSTREE_NODE *node){
         para->size=vec.size;
         para->real_size=vec.real_size;
     }
-    return l+r+k;
+    return ;
 }
 
 
 
 int ccmd_deal(int exit){
-    struct CDS_BSTREE_NODE **nd;
-    char buf[128],*key;
+    struct CDS_BSTREE_NODE **nd=NULL;
+    char buf[128],*key,ch[2];
     int var;
     int errn=0;
     for(int i=1;i<argc;i++){
@@ -89,15 +96,31 @@ int ccmd_deal(int exit){
             key=key+1;
         }
         var=0;
-        int len=strlen(key);
-        for(int j=0;j<len;j++){
-            if(key[j]=='='){
-                key[j]='\0';
-                var=j+1;
-                break;
+
+        ch[0]=key[0];
+        ch[1]='\0';
+        nd=cds_brtree_find(&params,ch);
+        if(nd){
+            var=1;
+            if(key[1]=='='){
+                key[1]='\0';
+                var=2;
             }
+        }else{
+            ch[0]='\0';
+            nd=cds_brtree_find(&params,ch);
         }
-        nd=cds_brtree_find(&params,key);
+        if(!nd){
+            int len=strlen(key);
+            for(int j=0;j<len;j++){
+                if(key[j]=='='){
+                    key[j]='\0';
+                    var=j+1;
+                    break;
+                }
+            }
+            nd=cds_brtree_find(&params,key);
+        }
         if(!nd){
             printf("%s:[%s]:can not deal the param.\n",argv[0],key);
             if(exit){
@@ -137,7 +160,13 @@ int ccmd_deal(int exit){
                 strcpy(str,&key[var]);
                 cds_vector_push_back(&vec,&str,sizeof(char*));
             }else if(node->flg&CCMD_INT_PARAM){
-                inte=str_to_int(&key[var]);
+                if(str_to_int(&key[var],&inte)){
+                    printf("%s:[%s]:\"%s\" is not a int type\n",argv[0],&key[var]);
+                    if(exit){
+                        return 1;
+                    }
+                    errn+1;
+                }
                 cds_vector_push_back(&vec,&inte,sizeof(int));
             }
             (*(void**)node->data)=vec.data;
@@ -157,17 +186,30 @@ int ccmd_deal(int exit){
             if(node->flg&CCMD_STR_PARAM){
                 (*(char**)node->data)=(char*)argv[i]+(&key[var]-buf);
             }else if(node->flg&CCMD_INT_PARAM){
-                (*(int*)node->data)=str_to_int(&key[var]);
+                if(str_to_int(&key[var],node->data)){
+                    printf("%s:[%s]:\"%s\" is not a int type\n",argv[0],&key[var]);
+                    if(exit){
+                        return 1;
+                    }
+                    errn+1;
+                }
             }else if(node->flg&CCMD_FUNCTION){
                 cds_vector_push_back(&funcs,&node->data,sizeof(CCMD_FUNC));
             }else{
                 (*(int*)node->data)=1;
             }
         }
+        nd=NULL;
     }
-    int r=find_required((struct CDS_BSTREE_NODE*)params.root);
+
+    int r=0;
+    find_required((struct CDS_BSTREE_NODE*)params.root,&r);
     if(r){
-        printf("%s:%d param be not defined.\n",argv[0],r);
+        if(r==1){
+            printf("%d param is not defined.\n",r);
+        }else{
+            printf("%d params are not defined.\n",r);
+        }
         errn+=r;
         return errn;
     }
