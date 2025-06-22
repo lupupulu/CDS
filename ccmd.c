@@ -85,11 +85,12 @@ inline static void find_required(struct CDS_BSTREE_NODE *node,int *times){
 
 
 int ccmd_deal(int exit){
-    struct CDS_BSTREE_NODE **nd=NULL;
+    struct CDS_BSTREE_NODE **nd;
     char buf[128],*key,ch[2];
     int var;
     int errn=0;
     for(int i=1;i<argc;i++){
+        nd=NULL;
         strcpy(buf,argv[i]);
         key=buf;
         if(key[0]=='/'||key[0]=='-'){
@@ -106,9 +107,6 @@ int ccmd_deal(int exit){
                 key[1]='\0';
                 var=2;
             }
-        }else{
-            ch[0]='\0';
-            nd=cds_brtree_find(&params,ch);
         }
         if(!nd){
             int len=strlen(key);
@@ -120,6 +118,10 @@ int ccmd_deal(int exit){
                 }
             }
             nd=cds_brtree_find(&params,key);
+        }
+        if(!nd){
+            ch[0]='\0';
+            nd=cds_brtree_find(&params,ch);
         }
         if(!nd){
             printf("%s:[%s]:can not deal the param.\n",argv[0],key);
@@ -199,7 +201,6 @@ int ccmd_deal(int exit){
                 (*(int*)node->data)=1;
             }
         }
-        nd=NULL;
     }
 
     int r=0;
