@@ -89,6 +89,9 @@ int ccmd_deal(int exit){
     char buf[128],*key,ch[2];
     int var;
     int errn=0;
+    char **next_data=NULL;
+    CCMD_PARAM *next_node=NULL;
+    CDS_VECTOR vec;
     for(int i=1;i<argc;i++){
         nd=NULL;
         strcpy(buf,argv[i]);
@@ -120,8 +123,26 @@ int ccmd_deal(int exit){
             nd=cds_brtree_find(&params,key);
         }
         if(!nd){
-            ch[0]='\0';
-            nd=cds_brtree_find(&params,ch);
+            if(next_data){
+                if(next_node){
+                    vec.data=(*(void**)next_node->data);
+                    vec.size=next_node->size;
+                    vec.real_size=next_node->real_size;
+                    cds_vector_push_back(&vec,&argv[i],sizeof(char*));
+                    (*(void**)next_node->data)=vec.data;
+                    next_node->size=vec.size;
+                    next_node->real_size=vec.real_size;
+                    (*(int*)cds_vector_at(&vec,0,sizeof(char*)))++;
+                }else{
+                    *next_data=(char*)argv[i];
+                }
+                next_data=NULL;
+                next_node=NULL;
+                continue;
+            }else{
+                ch[0]='\0';
+                nd=cds_brtree_find(&params,ch);
+            }
         }
         if(!nd){
             printf("%s:[%s]:can not deal the param.\n",argv[0],key);
@@ -132,7 +153,6 @@ int ccmd_deal(int exit){
             continue;
         }
         CCMD_PARAM *node=(CCMD_PARAM*)((*nd)->data);
-        CDS_VECTOR vec;
         char *str;
         int inte;
         int stride;
@@ -157,13 +177,23 @@ int ccmd_deal(int exit){
             vec.data=(*(void**)node->data);
             vec.size=node->size;
             vec.real_size=node->real_size;
-            if(node->flg&CCMD_STR_PARAM){
+            if(node->flg&CCMD_NEXT){
+                if(next_data){
+                    printf("%s:[%s]:the last switch is waiting value.\n",argv[0],key);
+                    if(exit){
+                        return 1;
+                    }
+                    errn+1;
+                }
+                next_data=(char**)&vec;
+                next_node=node;
+            }else if(node->flg&CCMD_STR_PARAM){
                 str=malloc(strlen(&key[var])+1);
                 strcpy(str,&key[var]);
                 cds_vector_push_back(&vec,&str,sizeof(char*));
             }else if(node->flg&CCMD_INT_PARAM){
                 if(str_to_int(&key[var],&inte)){
-                    printf("%s:[%s]:\"%s\" is not a int type\n",argv[0],&key[var]);
+                    printf("%s:[%s]:\"%s\" is not a int type\n",argv[0],key,&key[var]);
                     if(exit){
                         return 1;
                     }
@@ -174,7 +204,9 @@ int ccmd_deal(int exit){
             (*(void**)node->data)=vec.data;
             node->size=vec.size;
             node->real_size=vec.real_size;
-            (*(int*)cds_vector_at(&vec,0,stride))++;
+            if(!node->flg&CCMD_NEXT){
+                (*(int*)cds_vector_at(&vec,0,stride))++;
+            }
         }else{
             if(node->sw){
                 printf("%s:[%s]:this switch is used too many times.\n",argv[0],key);
@@ -185,11 +217,20 @@ int ccmd_deal(int exit){
                 continue;
             }
             node->sw=1;
-            if(node->flg&CCMD_STR_PARAM){
+            if(node->flg&CCMD_NEXT){
+                if(next_data){
+                    printf("%s:[%s]:the last switch is waiting value.\n",argv[0],key);
+                    if(exit){
+                        return 1;
+                    }
+                    errn+1;
+                }
+                next_data=node->data;
+            }else if(node->flg&CCMD_STR_PARAM){
                 (*(char**)node->data)=(char*)argv[i]+(&key[var]-buf);
             }else if(node->flg&CCMD_INT_PARAM){
                 if(str_to_int(&key[var],node->data)){
-                    printf("%s:[%s]:\"%s\" is not a int type\n",argv[0],&key[var]);
+                    printf("%s:[%s]:\"%s\" is not a int type\n",argv[0],key,&key[var]);
                     if(exit){
                         return 1;
                     }
@@ -213,6 +254,10 @@ int ccmd_deal(int exit){
         }
         errn+=r;
         return errn;
+    }
+
+    if(next_data){
+        printf("%s:?:the last switch is waiting value.\n",argv[0]);
     }
 
     for(register size_t i=0;i<funcs.size;i++){
