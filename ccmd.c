@@ -105,10 +105,16 @@ int ccmd_deal(int exit){
         ch[1]='\0';
         nd=cds_brtree_find(&params,ch);
         if(nd){
+            int flg=((CCMD_PARAM*)((*nd)->data))->flg;
             var=1;
-            if(key[1]=='='){
-                key[1]='\0';
-                var=2;
+            if(flg&CCMD_INT_PARAM||flg&CCMD_STR_PARAM||flg&CCMD_NEXT){
+                if(key[1]=='='){
+                    key[1]='\0';
+                    var=2;
+                }
+            }else if(key[1]!='\0'){
+                nd=NULL;
+                var=0;
             }
         }
         if(!nd){
