@@ -1,0 +1,871 @@
+甲、CDS
+    一个C语言下数据结构库
+
+一、宏及特殊类型：
+    1、CDS_H：
+    原型：
+        #define CDS_H
+    头文件宏，无特殊意义。
+
+    2、cds_at：
+    原型：
+        #define cds_at(name,tp,a,n) (*(tp*)cds_##name##_at(a,n,sizeof(tp)))
+    参数：
+        name：数据结构名。
+        tp：访问数据类型。
+        a：被访问结构名，一般为指针类型。
+        n：访问下标。
+    返回值：
+        一个tp类型的数据。
+    用于调用数据结构的at函数。
+    不建议使用。
+
+    3、cds_push：
+    原型：
+        #define cds_push(name,a,v) (cds_##name##_push(a,&(v),sizeof(v)))
+    参数：
+        name：数据结构名。
+        a：被访问结构名，一般为指针类型。
+        v：需被加入的数据（非其指针）。
+    用于向数组中加入数据。
+    不建议使用。
+
+    4、cds_insert：
+    原型：
+        #define cds_insert(name,t,k,v) (cds_##name##_insert(t,&(k),sizeof((k)),&(v),sizeof((v))))
+    参数：
+        name：数据结构名。
+        t：树名。
+        k：键数据（非其指针）。
+        v：值名（非其指针）。
+    用于向树结构中加入键值对。
+    不建议使用。
+
+    5、CDS_COMPARE_FUNC：
+    原型：
+        typedef int(*CDS_COMPARE_FUNC)(const void*,const void*);
+    参数：
+        两指针分别指向被比较数据地址。
+    返回值：
+        比较结果，须仅具有0和非0两种结果。
+    用于比较两数据。
+
+    6、CDS_PRINT_FUNC：
+    原型：
+        typedef void(*CDS_PRINT_FUNC)(const void*);
+    参数：
+        一个指向需输出数据的指针。
+    用于输出数据结构时，输出相应数据。
+    不建议使用。
+
+    7、CDS_CLOSE_FUNC：
+    原型：
+        typedef void(*CDS_CLOSE_FUNC)(const void*);
+    参数：
+        一个指向需被删除数据的指针。
+    用于删除数据结构时，删除其数据的函数。
+
+    8、cds_compare_int/cds_compare_float/cds_compare_string：
+    原型：
+        int cds_compare_int(const void *a,const void *b);
+        int cds_compare_float(const void *a,const void *b);
+        int cds_compare_string(const void *a,const void *b);
+    参数：
+        两指针分别指向被比较数据地址。
+    返回值：
+        对于int,float：第一个数据小于第二个数据时，返回1，其余情况返回0。
+        对于string：见strcmp（string.h中）返回值。
+    用于比较两数据大小，可直接作为CDS_COMPARE_FUNC类型函数使用。
+
+    9、cds_equal_int/cds_equal_float/cds_equal_string：
+    原型：
+        int cds_equal_int(const void *a,const void *b);
+        int cds_equal_float(const void *a,const void *b);
+        int cds_equal_string(const void *a,const void *b);
+    参数：
+        两指针分别指向被比较数据地址。
+    返回值：
+        数据相等时返回1，不相等时返回0。
+    用于判断两数据是否相等，可直接作为CDS_COMPARE_FUNC类型函数使用。
+    注意：浮点数比较可能存在精度误差。
+
+    10、cds_print_int/cds_print_float/cds_print_string：
+    原型：
+        void cds_print_int(const void *a);
+        void cds_print_float(const void *a);
+        void cds_print_string(const void *a);
+    参数：
+        一个指向需输出数据的指针。
+    将数据输出到标准输出(stdout)：
+    int: 打印整数值
+    float: 打印浮点数值
+    string: 打印字符串内容（以'\0'结尾）
+    用于数据结构打印函数中输出元素值。
+
+    11、CDS_PRINT_INT：
+    原型：见cds.h第26-28行。
+    生成指定位数的整数打印函数（固定宽度，不足位补0）。
+    示例：
+        CDS_PRINT_INT(5) 生成函数 cds_print_int_5
+        当输入整数123时，输出"00123"。
+
+    12、cds_swap：
+    原型：
+        void cds_swap(void *a,void *b,size_t size);
+    参数：
+        a：第一个数据的指针。
+        b：第二个数据的指针。
+        size：数据类型大小。
+        注意：a与b大小一致时使用。
+    交换a与b。
+    不建议使用。
+
+二：主要结构
+    1、CDS_VECTOR：
+    结构体原型：
+        typedef struct{
+            unsigned char *data;
+            size_t size;
+            size_t real_size;
+        }CDS_VECTOR;
+    元素：
+        data：指向连续的一块内存。
+        size：数组大小，单位为数据个数。
+        real_size：数组真实大小，单位为字节。
+    可变数组类型。
+    使用时，首先使用cds_vector_init进行初始化。
+    在结束时，使用cds_vector_close释放所占用内存。
+
+    函数：
+        cds_vector_init：
+        原型：
+            void cds_vector_init(CDS_VECTOR *a,size_t foot);
+        参数：
+            a：被访问结构名。
+            foot：将储存类型步长（事实上，可以忽略）。
+        初始化一个CDS_VECTOR。
+
+        cds_vector_set_size：
+        原型：
+            void cds_vector_set_size(CDS_VECTOR *a,size_t size);
+        参数：
+            a：被访问结构名。
+            size：目标数组大小，单位为字节。
+        设置数组大小，只能增加长度。
+        注意：修改后须手动修改size元素。
+
+        cds_vector_shorten：
+        原型：
+            void cds_vector_shorten(CDS_VECTOR *a,size_t size,size_t foot);
+        参数：
+            a：被访问结构名。
+            size：目标数组真实大小，单位为字节。
+            foot：类型步长。
+        缩短数组大小。
+
+        cds_vector_at：
+        原型：
+            void*cds_vector_at(CDS_VECTOR *a,size_t n,size_t foot);
+        参数：
+            a：被访问结构名。
+            n：访问下标。
+            foot：类型步长。
+        返回值：
+            被访问数据的地址。
+        访问目标元素。
+
+        cds_vector_push_back：
+        原型：
+            void cds_vector_push_back(CDS_VECTOR *a,const void *data,size_t size);
+        参数：
+            a：被访问结构名。
+            data：需被加入的数据地址。
+            size：数据类型大小。
+        将数据加入数组。
+        CDS_VECTOR中，将以real_size的两倍大小进行扩容。
+
+        cds_vector_push：
+        原型：
+            #define cds_vector_push(a,data,size) cds_vector_push_back(a,data,size);
+        参数：
+            a：被访问结构名。
+            data：需被加入的数据地址。
+            size：数据类型大小。
+        cds_vector_push_back，无其他特性。
+
+        cds_vector_pop_back：
+        原型：
+            void cds_vector_pop_back(CDS_VECTOR *a,CDS_CLOSE_FUNC func,size_t size);
+        参数：
+            a：被访问结构名。
+            func：用于删除数据的函数，可为NULL。
+            size：数据类型大小。
+        删除数组末尾数据。
+
+        cds_vector_close：
+        原型：
+            void cds_vector_close(CDS_VECTOR *a,CDS_CLOSE_FUNC func,size_t size);
+        参数：
+            a：被访问结构名。
+            func：用于删除数据的函数，可为NULL。
+            size：数据类型大小。
+        删除整个数组，vector将被重置，再次使用时须使用cds_vector_init初始化。
+
+        cds_vector_print：
+        原型：
+            void cds_vector_print(CDS_VECTOR *a,CDS_PRINT_FUNC func,size_t foot);
+        参数：
+            a：被访问结构名。
+            func：用于打印数据的函数。
+            foot：类型步长。
+        输出vector到stdout。
+        注意：若非必须，建议只在调试时使用。
+
+    2、CDS_STRING：
+    原型：
+        typedef CDS_VECTOR CDS_STRING;
+    与CDS_VECTOR相同（见第123行CDS_VECTOR）。
+    功能尚不完善，不建议使用。
+
+    函数：
+        cds_string_init：
+        原型：
+            void cds_string_init(CDS_STRING *s,const char *dst);
+        参数：
+            s：被访问字符串名。
+            dst：初始化字符串，可为NULL。
+        初始化一个CDS_STRING。
+
+        cds_string_length：
+        原型：
+            size_t cds_string_length(CDS_STRING *s);
+        参数：
+            s：被访问字符串名。
+        返回值：
+            字符串长度。
+        获得字符串长度，即s->size-1。
+
+        cds_string_add：
+        原型：
+            void cds_string_add(CDS_STRING *s,const char *dst);
+        参数：
+            s：被访问字符串名。
+            dst：被拼接至末尾的字符串。
+        拼接一个CDS_STRING以及const char *字符串。
+
+        cds_string_close：
+        原型：
+            #define cds_string_close(s) cds_vector_close(s,NULL,NULL)
+        参数：
+            a：被访问结构名。
+            func：用于删除数据的函数，可为NULL。
+            size：数据类型大小。
+        删除一个字符串（见第205行cds_vector_close）。
+
+    3、CDS_LINK：
+    结构体原型：
+        struct CDS_LINK_NODE{
+            struct CDS_LINK_NODE *next;
+            unsigned char *data;
+        };
+    元素：
+        next：下一节点地址。
+        data：数据地址。
+    结构体原型：
+        typedef struct{
+            struct CDS_LINK_NODE head;
+        }CDS_LINK;
+    元素：
+        head：链表头节点（哨兵节点）。
+    单向链表类型。
+    初始化时使用cds_link_init，结束时使用cds_link_close释放内存。
+    注意：节点0其实是head.next，head.data为NULL。
+
+    函数：
+        cds_link_init：
+        原型：
+            void cds_link_init(CDS_LINK *a);
+        参数：
+            a：链表指针。
+        初始化链表（设置头节点指针为NULL）。
+
+        cds_link_at：
+        原型：
+            void* cds_link_at(CDS_LINK *a, size_t n, size_t foot);
+        参数：
+            a：链表指针。
+            n：节点索引（0-based）。
+            foot：数据类型大小（未使用）。
+        返回值：
+            第n个节点的数据指针，索引越界时返回NULL。
+        通过索引访问链表节点数据。
+
+        cds_link_push：
+        原型：
+            void cds_link_push(struct CDS_LINK_NODE *node, const void *data, size_t data_size);
+        参数：
+            node：在此节点后插入新节点。
+            data：要插入的数据指针。
+            data_size：数据大小。
+        在指定节点后插入新节点。
+
+        cds_link_delete：
+        原型：
+            void cds_link_delete(struct CDS_LINK_NODE *node, CDS_CLOSE_FUNC func);
+        参数：
+            node：要删除其后继节点。
+            func：节点数据销毁函数（可为NULL）。
+        删除指定节点的直接后继节点。
+
+        cds_link_get：
+        原型：
+            struct CDS_LINK_NODE *cds_link_get(struct CDS_LINK_NODE *node, size_t n);
+        参数：
+            node：起始节点。
+            n：向后遍历的节点数。
+        返回值：
+            从node开始第n个节点指针。
+        节点遍历工具函数。
+
+        cds_link_close：
+        原型：
+            void cds_link_close(CDS_LINK *a, CDS_CLOSE_FUNC func);
+        参数：
+            a：链表指针。
+            func：节点数据销毁函数（可为NULL）。
+        销毁整个链表并释放所有资源。
+
+        cds_link_print：
+        原型：
+            void cds_link_print(CDS_LINK *a, CDS_PRINT_FUNC func);
+        参数：
+            a：链表指针。
+            func：数据打印函数。
+        顺序打印链表所有节点的数据。
+        注意：若非必须，建议只在调试时使用。
+
+    4、CDS_DOUBLYLINK：
+    结构体原型：
+        struct CDS_DOUBLYLINK_NODE{
+            struct CDS_DOUBLYLINK_NODE *next;
+            unsigned char *data;
+            struct CDS_DOUBLYLINK_NODE *last;
+        };
+    元素：
+        next：下一节点地址。
+        data：数据地址。
+        last：上一节点地址。
+    结构体原型：
+        typedef struct{
+            struct CDS_DOUBLYLINK_NODE head;
+        }CDS_DOUBLYLINK;
+    元素：
+        head：双向链表头节点（哨兵节点）。
+    双向链表类型，支持双向遍历。
+    注意：节点0其实是head.next/head.last，head.data为NULL。
+
+    函数：
+        cds_doublylink_init：
+        原型：
+            void cds_doublylink_init(CDS_DOUBLYLINK *a);
+        参数：
+            a：双向链表指针。
+        初始化双向链表。
+
+        cds_doublylink_at：
+        原型：
+            void* cds_doublylink_at(CDS_DOUBLYLINK *a, size_t n, size_t foot);
+        参数：
+            a：双向链表指针。
+            n：节点索引。
+            foot：数据类型大小（未使用）。
+        返回值：
+            第n个节点的数据指针。
+
+        cds_doublylink_push：
+        原型：
+            void cds_doublylink_push(struct CDS_DOUBLYLINK_NODE *node, const void *data, size_t data_size);
+        参数：
+            node：在此节点后插入新节点。
+            data：要插入的数据指针。
+            data_size：数据大小。
+        在指定节点后插入新节点。
+
+        cds_doublylink_push_before：
+        原型：
+            void cds_doublylink_push_before(struct CDS_DOUBLYLINK_NODE *node, const void *data, size_t data_size);
+        参数：
+            node：在此节点前插入新节点。
+            data：要插入的数据指针。
+            data_size：数据大小。
+        在指定节点前插入新节点。
+
+        cds_doublylink_delete：
+        原型：
+            void cds_doublylink_delete(struct CDS_DOUBLYLINK_NODE *node, CDS_CLOSE_FUNC func);
+        参数：
+            node：要删除其后继节点。
+            func：节点数据销毁函数。
+        删除指定节点的直接后继节点。
+
+        cds_doublylink_delete_before：
+        原型：
+            void cds_doublylink_delete_before(struct CDS_DOUBLYLINK_NODE *node, CDS_CLOSE_FUNC func);
+        参数：
+            node：要删除其前驱节点。
+            func：节点数据销毁函数。
+        删除指定节点的直接前驱节点。
+
+        cds_doublylink_get：
+        原型：
+            struct CDS_DOUBLYLINK_NODE *cds_doublylink_get(struct CDS_DOUBLYLINK_NODE *node, long long n);
+        参数：
+            node：起始节点。
+            n：要遍历的节点数（正数向后，负数向前）。
+        返回值：
+            相对node的第n个节点指针。
+        支持双向遍历的节点访问函数。
+
+        cds_doublylink_close：
+        原型：
+            void cds_doublylink_close(CDS_DOUBLYLINK *a, CDS_CLOSE_FUNC func);
+        参数：
+            a：双向链表指针。
+            func：节点数据销毁函数。
+        销毁整个双向链表。
+
+        cds_doublylink_print：
+        原型：
+            void cds_doublylink_print(CDS_DOUBLYLINK *a, CDS_PRINT_FUNC func);
+        参数：
+            a：双向链表指针。
+            func：数据打印函数。
+        分两行打印链表：首行向前遍历，次行向后遍历。
+
+    5、CDS_QUEUE：
+    结构体原型：
+        typedef struct{
+            CDS_LINK linked;
+            struct CDS_LINK_NODE *last;
+        }CDS_QUEUE;
+    元素：
+        linked：底层链表结构。
+        last：指向队尾节点。
+    队列类型，基于单向链表实现。
+
+    函数：
+        cds_queue_init：
+        原型：
+            void cds_queue_init(CDS_QUEUE *q);
+        参数：
+            q：队列指针。
+        初始化队列。
+
+        cds_queue_push：
+        原型：
+            void cds_queue_push(CDS_QUEUE *q, const void *data, size_t data_size);
+        参数：
+            q：队列指针。
+            data：入队数据指针。
+            data_size：数据大小。
+        数据入队（添加到队尾）。
+
+        cds_queue_pop：
+        原型：
+            void cds_queue_pop(CDS_QUEUE *q, CDS_CLOSE_FUNC func);
+        参数：
+            q：队列指针。
+            func：数据销毁函数（可为NULL）。
+        队首数据出队。
+
+        cds_queue_front：
+        原型：
+            void *cds_queue_front(CDS_QUEUE *q);
+        参数：
+            q：队列指针。
+        返回值：
+            队首数据指针（不出队）。
+        访问队首元素。
+
+        cds_queue_empty：
+        原型：
+            int cds_queue_empty(CDS_QUEUE *q);
+        参数：
+            q：队列指针。
+        返回值：
+            队列为空返回1，否则返回0。
+        判断队列是否为空。
+
+        cds_queue_close：
+        原型：
+            void cds_queue_close(CDS_QUEUE *q, CDS_CLOSE_FUNC func);
+        参数：
+            q：队列指针。
+            func：数据销毁函数。
+        销毁整个队列。
+
+        cds_queue_print：
+        原型：
+            void cds_queue_print(CDS_QUEUE *q, CDS_PRINT_FUNC func);
+        参数：
+            q：队列指针。
+            func：数据打印函数。
+        顺序打印队列所有元素（从队首到队尾）。
+
+    6、CDS_HEAP：
+    结构体原型：
+        struct CDS_HEAP_NODE{
+            void *key;
+            void *value;
+        };
+        typedef struct{
+            CDS_VECTOR data;
+            CDS_COMPARE_FUNC cmp;
+        }CDS_HEAP;
+    元素：
+        data：存储堆节点的动态数组。
+        cmp：节点比较函数。
+    最小堆/最大堆（由比较函数决定），基于动态数组实现。
+
+    函数：
+        cds_heap_init：
+        原型：
+            void cds_heap_init(CDS_HEAP *heap, CDS_COMPARE_FUNC cmp);
+        参数：
+            heap：堆指针。
+            cmp：节点比较函数（决定堆类型）。
+        初始化堆结构。
+
+        cds_heap_push：
+        原型：
+            void cds_heap_push(CDS_HEAP *heap, void *key, size_t key_size, void *value, size_t value_size);
+        参数：
+            heap：堆指针。
+            key：键值指针。
+            key_size：键值大小。
+            value：数据指针。
+            value_size：数据大小。
+        插入键值对到堆中，并维护堆结构。
+
+        cds_heap_pop：
+        原型：
+            void cds_heap_pop(CDS_HEAP *heap, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);
+        参数：
+            heap：堆指针。
+            key_f：键销毁函数（可为NULL）。
+            value_f：值销毁函数（可为NULL）。
+        弹出堆顶元素，并维护堆结构。
+
+        cds_heap_front：
+        原型：
+            struct CDS_HEAP_NODE *cds_heap_front(CDS_HEAP *heap);
+        参数：
+            heap：堆指针。
+        返回值：
+            堆顶元素指针（不弹出）。
+        访问堆顶元素。
+
+        cds_heap_empty：
+        原型：
+            int cds_heap_empty(CDS_HEAP *heap);
+        参数：
+            heap：堆指针。
+        返回值：
+            堆为空返回1，否则返回0。
+        判断堆是否为空。
+
+        cds_heap_close：
+        原型：
+            void cds_heap_close(CDS_HEAP *heap, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);
+        参数：
+            heap：堆指针。
+            key_f：键销毁函数。
+            value_f：值销毁函数。
+        销毁整个堆并释放所有资源。
+
+    7、CDS_BSTREE：
+    结构体原型：
+        struct CDS_BSTREE_NODE{
+            struct CDS_BSTREE_NODE *l, *r;
+            unsigned char *key;
+            unsigned char *data;
+        };
+    元素：
+        l：左节点。
+        r：右节点。
+        key：键指针。
+        data：值指针。
+    结构体原型：
+        typedef struct{
+            struct CDS_BSTREE_NODE *root;
+            CDS_COMPARE_FUNC cmp, equal;
+        }CDS_BSTREE;
+    元素：
+        root：树根节点。
+        cmp：用于比较键值大小的函数。
+        equal：用于判断键值相等的函数。
+    二叉搜索树实现。
+    注意：功能不完善，不建议使用。
+
+    函数：
+        cds_bstree_init：
+        原型：
+            void cds_bstree_init(CDS_BSTREE *t, CDS_COMPARE_FUNC cmp, CDS_COMPARE_FUNC equal);
+        参数：
+            t：树指针。
+            cmp：键值比较函数。
+            equal：键值相等判断函数。
+        初始化二叉搜索树。
+
+        cds_bstree_insert：
+        原型：
+            void cds_bstree_insert(CDS_BSTREE *t, void *key, size_t key_size, void *value, size_t value_size);
+        参数：
+            t：树指针。
+            key：键指针。
+            key_size：键大小。
+            value：值指针。
+            value_size：值大小。
+        插入键值对到二叉搜索树。
+
+        cds_bstree_find：
+        原型：
+            struct CDS_BSTREE_NODE **cds_bstree_find(CDS_BSTREE *t, void *key);
+        参数：
+            t：树指针。
+            key：要查找的键。
+        返回值：
+            指向目标节点指针的指针（用于后续操作）。
+        查找指定键的节点。
+
+        cds_bstree_at：
+        原型：
+            void* cds_bstree_at(CDS_BSTREE *t, void *key, size_t key_size);
+        参数：
+            t：树指针。
+            key：要查找的键。
+            key_size：键大小（未使用）。
+        返回值：
+            键对应的值指针，未找到返回NULL。
+        按键查找值。
+
+        cds_bstree_delete：
+        原型：
+            void cds_bstree_delete(struct CDS_BSTREE_NODE **node, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);
+        参数：
+            node：指向节点指针的指针（通常来自cds_bstree_find）。
+            key_f：键销毁函数。
+            value_f：值销毁函数。
+        删除指定节点。
+
+        cds_bstree_close：
+        原型：
+            void cds_bstree_close(CDS_BSTREE *t, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);
+        参数：
+            t：树指针。
+            key_f：键销毁函数。
+            value_f：值销毁函数。
+        销毁整棵树。
+
+        cds_bstree_print：
+        原型：
+            void cds_bstree_print(CDS_BSTREE *t, CDS_PRINT_FUNC key_print, size_t key_length, 
+                                 CDS_PRINT_FUNC value_print, size_t value_length,
+                                 CDS_PRINT_FUNC extra_print, size_t extra_length);
+        参数：
+            t：树指针。
+            key_print：键打印函数。
+            key_length：键打印宽度。
+            value_print：值打印函数。
+            value_length：值打印宽度。
+            extra_print：额外信息打印函数。
+            extra_length：额外信息宽度。
+        以树状结构打印二叉搜索树（控制台输出）。
+
+        cds_bstree_get_node_num：
+        原型：
+            size_t cds_bstree_get_node_num(struct CDS_BSTREE_NODE *node);
+        参数：
+            node：子树根节点。
+        返回值：
+            子树节点总数。
+        递归计算子树节点数量。
+
+    20、CDS_AVLTREE：
+    结构体原型：
+        struct CDS_AVLTREE_NODE{
+            struct CDS_AVLTREE_NODE *l, *r;
+            unsigned char *key;
+            unsigned char *data;
+            size_t height;
+            int lazy_tag:1;
+        };
+    元素：
+        l：左节点。
+        r：右节点。
+        key：键指针。
+        data：值指针。
+        height：高度。
+        lazy_tag：懒标记。
+    结构体原型：
+        typedef struct{
+            struct CDS_AVLTREE_NODE *root;
+            CDS_COMPARE_FUNC cmp, equal;
+        }CDS_AVLTREE;
+    元素：
+        继承自二叉搜索树，增加height（节点高度）和lazy_tag（延迟更新标记）。
+        AVL平衡二叉搜索树实现。
+
+    函数：
+        cds_avltree_init：
+        原型：
+            void cds_avltree_init(CDS_AVLTREE *t, CDS_COMPARE_FUNC cmp, CDS_COMPARE_FUNC equal);
+        参数同二叉搜索树。
+        初始化AVL树。
+
+        cds_avltree_insert：
+        原型：
+            void cds_avltree_insert(CDS_AVLTREE *t, void *key, unsigned key_size, void *value, unsigned value_size);
+        参数同二叉搜索树。
+        插入键值对并自动平衡。
+
+        cds_avltree_delete：
+        原型：
+            void cds_avltree_delete(struct CDS_AVLTREE_NODE **node, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);
+        参数同二叉搜索树。
+        删除节点并自动平衡。
+
+        cds_avltree_close：
+        原型：
+            void cds_avltree_close(CDS_AVLTREE *t, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);
+        参数同二叉搜索树。
+        销毁整棵AVL树。
+
+        注：查找函数cds_avltree_find/at通过宏复用二叉搜索树的实现。
+
+    21、CDS_BRTREE：
+    结构体原型：
+        struct CDS_BRTREE_NODE{
+            struct CDS_BRTREE_NODE *l, *r;
+            unsigned char *key;
+            unsigned char *data;
+            struct CDS_BRTREE_NODE *parent;
+            int color:1;
+        };
+    元素：
+        l：左节点。
+        r：右节点。
+        key：键指针。
+        data：值指针。
+        parent：父指针。
+        color：颜色（红/黑）。
+    结构体原型：
+        typedef struct{
+            struct CDS_BRTREE_NODE *root;
+            CDS_COMPARE_FUNC cmp, equal;
+        }CDS_BRTREE;
+    元素：
+        继承自二叉搜索树，增加parent（父节点指针）和color（节点颜色）。
+        红黑树实现。
+
+    函数：
+        cds_brtree_init：
+        原型：
+            void cds_brtree_init(CDS_BRTREE *t, CDS_COMPARE_FUNC cmp, CDS_COMPARE_FUNC equal);
+        参数同二叉搜索树。
+        初始化红黑树。
+
+        cds_brtree_insert：
+        原型：
+            void cds_brtree_insert(CDS_BRTREE* t, void* key, unsigned key_size, void* value, unsigned value_size);
+        参数同二叉搜索树。
+        插入键值对并维护红黑树特性。
+
+        cds_brtree_delete：
+        原型：
+            void cds_brtree_delete(struct CDS_BRTREE_NODE** node);
+        参数：
+            node：指向要删除节点的指针的指针。
+        删除节点并维护红黑树特性（注意：不自动处理关联数据销毁）。
+
+        cds_brtree_close：
+        原型：
+            void cds_brtree_close(CDS_BRTREE* t, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);
+        参数同二叉搜索树。
+        销毁整棵红黑树。
+
+        注：查找函数cds_brtree_find/at通过宏复用二叉搜索树的实现。
+
+
+
+
+乙、ccmd
+    用于处理由终端传入的参数。
+
+    1、ccmd_init：
+    原型：
+        void ccmd_init(int argc,const char **argv);
+    参数：
+        argc：参数数量，一般等于main中argc。
+        ragv：参数，一般等于main中argv。
+    初始化ccmd，在调用其他一切函数前必须调用。
+
+    2、ccmd_set_para：
+    原型：
+        void ccmd_set_para(const char *sw,int flg,void *data);
+    参数：
+        sw：参数名。
+        flg：附加说明，为以下值之一，使用时使用|链接。
+            CCMD_REQUIRED：必须被使用，不可与CCMD_OPTIONAL连用。
+            CCMD_OPTIONAL：可选的参数。
+            CCMD_STR_PARAM：参数为char*类型，data应为char**类型。
+            CCMD_INT_PARAM：参数为int类型，data应为int*类型。
+            CCMD_VARIABLE：可重复的参数，与CCMD_STR_PARAM或CCMD_NEXT连用时，data为char***类型，与CCMD_INT_PARAM连用时，data为int**类型。
+            CCMD_FUNCTION：若被使用，执行data的函数，类型应为CCMD_FUNC。
+            CCMD_NEXT：参数值为下一个无法被正常处理的参数，data应为char**类型。
+        data：值指针。
+    设置参数。
+    注意：CCMD_STR_PARAM与CCMD_INT_PARAM与CCMD_NEXT不可连用；CCMD_VARIABLE必须与CCMD_STR_PARAM或CCMD_INT_PARAM或CCMD_NEXT连用。
+
+    3、ccmd_deal：
+    原型：
+        int ccmd_deal(int exit);
+    参数：
+        exit：若为1，出错时退出；若为0，继续执行。
+    返回值：
+        出错个数。
+    在设置好全部参数后，调用以处理。
+
+    4、ccmd_param_size：
+    原型：
+        int ccmd_param_size(void *data);
+    参数：
+        data：值指针；只在被CCMD_VARIABLE修饰的参数中使用，类型为char**或int*。
+    返回值：
+        参数个数。
+    获得参数的个数。
+
+    5、ccmd_str_param_at：
+    原型：
+        void *ccmd_str_param_at(void *data,int n);
+    参数：
+        data：值指针；只在被CCMD_VARIABLE与CCMD_STR_PARAM同时修饰的参数中使用，类型为char**或int*。
+        n：访问下标。
+    返回值：
+        被访问的数据，类型为char*。
+    获得data中字符串。
+
+    6、ccmd_int_param_at：
+    原型：
+        int ccmd_int_param_at(void *data,int n);
+    参数：
+        data：值指针；只在被CCMD_VARIABLE与CCMD_STR_PARAM同时修饰的参数中使用，类型为char**或int*。
+        n：访问下标。
+    返回值：
+        被访问的数据。
+    获得data中数值。
+
+    7、ccmd_close：
+    原型：
+        void ccmd_close(void);
+    关闭ccmd，在结束程序时调用，释放ccmd占用资源。
