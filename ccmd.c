@@ -210,7 +210,7 @@ int ccmd_deal(int exit){
             (*(void**)node->data)=vec.data;
             node->size=vec.size;
             node->real_size=vec.real_size;
-            if(!node->flg&CCMD_NEXT){
+            if(!(node->flg&CCMD_NEXT)){
                 (*(int*)cds_vector_at(&vec,0,stride))++;
             }
         }else{
