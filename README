@@ -1,0 +1,9 @@
+CDS - Some lightweight open-source libraries for C
+
+==============
+
+There are two parts in CDS:
+    1.cds - Data structures library including vector, brtree, heap, etc.
+    2.ccmd - Handle parameters from the shell.
+
+Include the source code directly in your project to use them.
