@@ -1,0 +1,872 @@
+A. CDS  
+    A data structure library for C language.  
+
+I. Macros and Special Types:  
+    1. CDS_H:  
+    Prototype:  
+        #define CDS_H  
+    Header file macro, no special meaning.  
+
+    2. cds_at:  
+    Prototype:  
+        #define cds_at(name,tp,a,n) (*(tp*)cds_##name##_at(a,n,sizeof(tp)))  
+    Parameters:  
+        name: Data structure name.  
+        tp: Data type to access.  
+        a: Target structure name, usually a pointer type.  
+        n: Index to access.  
+    Return value:  
+        A value of type tp.  
+    Used to call the `at` function of data structures.  
+    Not recommended.  
+
+    3. cds_push:  
+    Prototype:  
+        #define cds_push(name,a,v) (cds_##name##_push(a,&(v),sizeof(v)))  
+    Parameters:  
+        name: Data structure name.  
+        a: Target structure name, usually a pointer type.  
+        v: Data to be added (not its pointer).  
+    Used to add data to arrays.  
+    Not recommended.  
+
+    4. cds_insert:  
+    Prototype:  
+        #define cds_insert(name,t,k,v) (cds_##name##_insert(t,&(k),sizeof((k)),&(v),sizeof((v))))  
+    Parameters:  
+        name: Data structure name.  
+        t: Tree name.  
+        k: Key data (not its pointer).  
+        v: Value data (not its pointer).  
+    Used to add key-value pairs to tree structures.  
+    Not recommended.  
+
+    5. CDS_COMPARE_FUNC:  
+    Prototype:  
+        typedef int(*CDS_COMPARE_FUNC)(const void*,const void*);  
+    Parameters:  
+        Two pointers pointing to the addresses of the data to be compared.  
+    Return value:  
+        Comparison result, must have only 0 and non-0 outcomes.  
+    Used to compare two data items.  
+
+    6. CDS_PRINT_FUNC:  
+    Prototype:  
+        typedef void(*CDS_PRINT_FUNC)(const void*);  
+    Parameters:  
+        A pointer to the data to be printed.  
+    Used to output corresponding data when printing data structures.  
+    Not recommended.  
+
+    7. CDS_CLOSE_FUNC:  
+    Prototype:  
+        typedef void(*CDS_CLOSE_FUNC)(const void*);  
+    Parameters:  
+        A pointer to the data to be deleted.  
+    Function used to delete data when destroying data structures.  
+
+    8. cds_compare_int/cds_compare_float/cds_compare_string:  
+    Prototype:  
+        int cds_compare_int(const void *a,const void *b);  
+        int cds_compare_float(const void *a,const void *b);  
+        int cds_compare_string(const void *a,const void *b);  
+    Parameters:  
+        Two pointers pointing to the addresses of the data to be compared.  
+    Return value:  
+        For int, float: Returns 1 if the first data is less than the second, otherwise 0.  
+        For string: See return value of `strcmp` (in string.h).  
+    Used to compare the size of two data items; can be used directly as CDS_COMPARE_FUNC type functions.  
+
+    9. cds_equal_int/cds_equal_float/cds_equal_string:  
+    Prototype:  
+        int cds_equal_int(const void *a,const void *b);  
+        int cds_equal_float(const void *a,const void *b);  
+        int cds_equal_string(const void *a,const void *b);  
+    Parameters:  
+        Two pointers pointing to the addresses of the data to be compared.  
+    Return value:  
+        Returns 1 if the data are equal, 0 otherwise.  
+    Used to determine if two data items are equal; can be used directly as CDS_COMPARE_FUNC type functions.  
+    Note: Floating-point comparisons may have precision errors.  
+
+    10. cds_print_int/cds_print_float/cds_print_string:  
+    Prototype:  
+        void cds_print_int(const void *a);  
+        void cds_print_float(const void *a);  
+        void cds_print_string(const void *a);  
+    Parameters:  
+        A pointer to the data to be printed.  
+    Outputs data to stdout:  
+        int: Prints integer value.  
+        float: Prints floating-point value.  
+        string: Prints string content (null-terminated).  
+    Used to output element values in data structure printing functions.  
+
+    11. CDS_PRINT_INT:  
+    Prototype: See lines 26-28 in cds.h.  
+    Generates an integer printing function with a fixed width (pads with zeros if needed).  
+    Example:  
+        CDS_PRINT_INT(5) generates function `cds_print_int_5`.  
+        For input integer 123, outputs "00123".  
+
+    12. cds_swap:  
+    Prototype:  
+        void cds_swap(void *a,void *b,size_t size);  
+    Parameters:  
+        a: Pointer to the first data.  
+        b: Pointer to the second data.  
+        size: Size of the data type.  
+        Note: Use only when a and b are the same size.  
+    Swaps a and b.  
+    Not recommended.  
+
+II: Main Structures  
+    1. CDS_VECTOR:  
+    Struct Prototype:  
+        typedef struct{  
+            unsigned char *data;  
+            size_t size;  
+            size_t real_size;  
+        }CDS_VECTOR;  
+    Elements:  
+        data: Pointer to a contiguous block of memory.  
+        size: Array size, in number of elements.  
+        real_size: Actual array size in bytes.  
+    Dynamic array type.  
+    Initialize using `cds_vector_init`.  
+    Release memory using `cds_vector_close` when finished.  
+
+    Functions:  
+        cds_vector_init:  
+        Prototype:  
+            void cds_vector_init(CDS_VECTOR *a,size_t foot);  
+        Parameters:  
+            a: Target structure.  
+            foot: Stride of the stored type (can often be ignored).  
+        Initializes a CDS_VECTOR.  
+
+        cds_vector_set_size:  
+        Prototype:  
+            void cds_vector_set_size(CDS_VECTOR *a,size_t size);  
+        Parameters:  
+            a: Target structure.  
+            size: Target array size in bytes.  
+        Sets the array size; can only increase length.  
+        Note: The `size` element must be updated manually after modification.  
+
+        cds_vector_shorten:  
+        Prototype:  
+            void cds_vector_shorten(CDS_VECTOR *a,size_t size,size_t foot);  
+        Parameters:  
+            a: Target structure.  
+            size: Target actual array size in bytes.  
+            foot: Type stride.  
+        Shortens the array size.  
+
+        cds_vector_at:  
+        Prototype:  
+            void* cds_vector_at(CDS_VECTOR *a,size_t n,size_t foot);  
+        Parameters:  
+            a: Target structure.  
+            n: Index to access.  
+            foot: Type stride.  
+        Return value:  
+            Address of the accessed data.  
+        Accesses the target element.  
+
+        cds_vector_push_back:  
+        Prototype:  
+            void cds_vector_push_back(CDS_VECTOR *a,const void *data,size_t size);  
+        Parameters:  
+            a: Target structure.  
+            data: Address of data to be added.  
+            size: Size of the data type.  
+        Adds data to the array.  
+        CDS_VECTOR expands to twice the `real_size` when needed.  
+
+        cds_vector_push:  
+        Prototype:  
+            #define cds_vector_push(a,data,size) cds_vector_push_back(a,data,size);  
+        Parameters:  
+            a: Target structure.  
+            data: Address of data to be added.  
+            size: Size of the data type.  
+        Alias for `cds_vector_push_back`.  
+
+        cds_vector_pop_back:  
+        Prototype:  
+            void cds_vector_pop_back(CDS_VECTOR *a,CDS_CLOSE_FUNC func,size_t size);  
+        Parameters:  
+            a: Target structure.  
+            func: Function to delete data (can be NULL).  
+            size: Size of the data type.  
+        Removes the last element from the array.  
+
+        cds_vector_close:  
+        Prototype:  
+            void cds_vector_close(CDS_VECTOR *a,CDS_CLOSE_FUNC func,size_t size);  
+        Parameters:  
+            a: Target structure.  
+            func: Function to delete data (can be NULL).  
+            size: Size of the data type.  
+        Deletes the entire array; the vector is reset and must be reinitialized with `cds_vector_init` before reuse.  
+
+        cds_vector_print:  
+        Prototype:  
+            void cds_vector_print(CDS_VECTOR *a,CDS_PRINT_FUNC func,size_t foot);  
+        Parameters:  
+            a: Target structure.  
+            func: Function to print data.  
+            foot: Type stride.  
+        Prints the vector to stdout.  
+        Note: Recommended for debugging only unless necessary.  
+
+    2. CDS_STRING:  
+    Prototype:  
+        typedef CDS_VECTOR CDS_STRING;  
+    Same as CDS_VECTOR (see CDS_VECTOR description above).  
+    Functionality is incomplete; not recommended.  
+
+    Functions:  
+        cds_string_init:  
+        Prototype:  
+            void cds_string_init(CDS_STRING *s,const char *dst);  
+        Parameters:  
+            s: Target string.  
+            dst: Initialization string (can be NULL).  
+        Initializes a CDS_STRING.  
+
+        cds_string_length:  
+        Prototype:  
+            size_t cds_string_length(CDS_STRING *s);  
+        Parameters:  
+            s: Target string.  
+        Return value:  
+            String length.  
+        Gets the string length, which is `s->size - 1`.  
+
+        cds_string_add:  
+        Prototype:  
+            void cds_string_add(CDS_STRING *s,const char *dst);  
+        Parameters:  
+            s: Target string.  
+            dst: String to concatenate to the end.  
+        Concatenates a CDS_STRING and a `const char *` string.  
+
+        cds_string_close:  
+        Prototype:  
+            #define cds_string_close(s) cds_vector_close(s,NULL,NULL)  
+        Parameters:  
+            a: Target structure.  
+            func: Function to delete data (can be NULL).  
+            size: Size of the data type.  
+        Deletes a string (see `cds_vector_close`).  
+
+    3. CDS_LINK:  
+    Node Struct Prototype:  
+        struct CDS_LINK_NODE{  
+            struct CDS_LINK_NODE *next;  
+            unsigned char *data;  
+        };  
+    Elements:  
+        next: Address of next node.  
+        data: Data address.  
+    Container Struct Prototype:  
+        typedef struct{  
+            struct CDS_LINK_NODE head;  
+        }CDS_LINK;  
+    Elements:  
+        head: Linked list head node (sentinel node).  
+    Singly Linked List type.  
+    Initialize with `cds_link_init`, release memory with `cds_link_close`.  
+    Note: Node 0 is actually `head.next`; `head.data` is NULL.  
+
+    Functions:  
+        cds_link_init:  
+        Prototype:  
+            void cds_link_init(CDS_LINK *a);  
+        Parameters:  
+            a: Linked list pointer.  
+        Initializes the linked list (sets head.next pointer to NULL).  
+
+        cds_link_at:  
+        Prototype:  
+            void* cds_link_at(CDS_LINK *a, size_t n, size_t foot);  
+        Parameters:  
+            a: Linked list pointer.  
+            n: Node index (0-based).  
+            foot: Data type size (unused).  
+        Return value:  
+            Data pointer of the n-th node; returns NULL if index out of bounds.  
+        Accesses linked list node data by index.  
+
+        cds_link_push:  
+        Prototype:  
+            void cds_link_push(struct CDS_LINK_NODE *node, const void *data, size_t data_size);  
+        Parameters:  
+            node: Insert new node after this node.  
+            data: Pointer to data to insert.  
+            data_size: Data size.  
+        Inserts a new node after the specified node.  
+
+        cds_link_delete:  
+        Prototype:  
+            void cds_link_delete(struct CDS_LINK_NODE *node, CDS_CLOSE_FUNC func);  
+        Parameters:  
+            node: Node whose direct successor is to be deleted.  
+            func: Node data destruction function (can be NULL).  
+        Deletes the direct successor node of the specified node.  
+
+        cds_link_get:  
+        Prototype:  
+            struct CDS_LINK_NODE *cds_link_get(struct CDS_LINK_NODE *node, size_t n);  
+        Parameters:  
+            node: Starting node.  
+            n: Number of nodes to traverse forward.  
+        Return value:  
+            Pointer to the n-th node from `node`.  
+        Node traversal utility function.  
+
+        cds_link_close:  
+        Prototype:  
+            void cds_link_close(CDS_LINK *a, CDS_CLOSE_FUNC func);  
+        Parameters:  
+            a: Linked list pointer.  
+            func: Node data destruction function (can be NULL).  
+        Destroys the entire linked list and releases all resources.  
+
+        cds_link_print:  
+        Prototype:  
+            void cds_link_print(CDS_LINK *a, CDS_PRINT_FUNC func);  
+        Parameters:  
+            a: Linked list pointer.  
+            func: Data printing function.  
+        Prints the data of all nodes in the linked list sequentially.  
+        Note: Recommended for debugging only unless necessary.  
+
+    4. CDS_DOUBLYLINK:  
+    Node Struct Prototype:  
+        struct CDS_DOUBLYLINK_NODE{  
+            struct CDS_DOUBLYLINK_NODE *next;  
+            unsigned char *data;  
+            struct CDS_DOUBLYLINK_NODE *last;  
+        };  
+    Elements:  
+        next: Address of next node.  
+        data: Data address.  
+        last: Address of previous node.  
+    Container Struct Prototype:  
+        typedef struct{  
+            struct CDS_DOUBLYLINK_NODE head;  
+        }CDS_DOUBLYLINK;  
+    Elements:  
+        head: Doubly linked list head node (sentinel node).  
+    Doubly Linked List type, supports bidirectional traversal.  
+    Note: Node 0 is actually `head.next`/`head.last`; `head.data` is NULL.  
+
+    Functions:  
+        cds_doublylink_init:  
+        Prototype:  
+            void cds_doublylink_init(CDS_DOUBLYLINK *a);  
+        Parameters:  
+            a: Doubly linked list pointer.  
+        Initializes the doubly linked list.  
+
+        cds_doublylink_at:  
+        Prototype:  
+            void* cds_doublylink_at(CDS_DOUBLYLINK *a, size_t n, size_t foot);  
+        Parameters:  
+            a: Doubly linked list pointer.  
+            n: Node index.  
+            foot: Data type size (unused).  
+        Return value:  
+            Data pointer of the n-th node.  
+
+        cds_doublylink_push:  
+        Prototype:  
+            void cds_doublylink_push(struct CDS_DOUBLYLINK_NODE *node, const void *data, size_t data_size);  
+        Parameters:  
+            node: Insert new node after this node.  
+            data: Pointer to data to insert.  
+            data_size: Data size.  
+        Inserts a new node after the specified node.  
+
+        cds_doublylink_push_before:  
+        Prototype:  
+            void cds_doublylink_push_before(struct CDS_DOUBLYLINK_NODE *node, const void *data, size_t data_size);  
+        Parameters:  
+            node: Insert new node before this node.  
+            data: Pointer to data to insert.  
+            data_size: Data size.  
+        Inserts a new node before the specified node.  
+
+        cds_doublylink_delete:  
+        Prototype:  
+            void cds_doublylink_delete(struct CDS_DOUBLYLINK_NODE *node, CDS_CLOSE_FUNC func);  
+        Parameters:  
+            node: Node whose direct successor is to be deleted.  
+            func: Node data destruction function.  
+        Deletes the direct successor node of the specified node.  
+
+        cds_doublylink_delete_before:  
+        Prototype:  
+            void cds_doublylink_delete_before(struct CDS_DOUBLYLINK_NODE *node, CDS_CLOSE_FUNC func);  
+        Parameters:  
+            node: Node whose direct predecessor is to be deleted.  
+            func: Node data destruction function.  
+        Deletes the direct predecessor node of the specified node.  
+
+        cds_doublylink_get:  
+        Prototype:  
+            struct CDS_DOUBLYLINK_NODE *cds_doublylink_get(struct CDS_DOUBLYLINK_NODE *node, long long n);  
+        Parameters:  
+            node: Starting node.  
+            n: Number of nodes to traverse (positive for forward, negative for backward).  
+        Return value:  
+            Pointer to the n-th node relative to `node`.  
+        Node access function supporting bidirectional traversal.  
+
+        cds_doublylink_close:  
+        Prototype:  
+            void cds_doublylink_close(CDS_DOUBLYLINK *a, CDS_CLOSE_FUNC func);  
+        Parameters:  
+            a: Doubly linked list pointer.  
+            func: Node data destruction function.  
+        Destroys the entire doubly linked list.  
+
+        cds_doublylink_print:  
+        Prototype:  
+            void cds_doublylink_print(CDS_DOUBLYLINK *a, CDS_PRINT_FUNC func);  
+        Parameters:  
+            a: Doubly linked list pointer.  
+            func: Data printing function.  
+        Prints the list in two lines: First line traverses backward, second line traverses forward.  
+
+    5. CDS_QUEUE:  
+    Struct Prototype:  
+        typedef struct{  
+            CDS_LINK linked;  
+            struct CDS_LINK_NODE *last;  
+        }CDS_QUEUE;  
+    Elements:  
+        linked: Underlying linked list structure.  
+        last: Pointer to the tail node.  
+    Queue type, implemented using a singly linked list.  
+
+    Functions:  
+        cds_queue_init:  
+        Prototype:  
+            void cds_queue_init(CDS_QUEUE *q);  
+        Parameters:  
+            q: Queue pointer.  
+        Initializes the queue.  
+
+        cds_queue_push:  
+        Prototype:  
+            void cds_queue_push(CDS_QUEUE *q, const void *data, size_t data_size);  
+        Parameters:  
+            q: Queue pointer.  
+            data: Pointer to data to enqueue.  
+            data_size: Data size.  
+        Enqueues data (adds to the tail).  
+
+        cds_queue_pop:  
+        Prototype:  
+            void cds_queue_pop(CDS_QUEUE *q, CDS_CLOSE_FUNC func);  
+        Parameters:  
+            q: Queue pointer.  
+            func: Data destruction function (can be NULL).  
+        Dequeues data from the head.  
+
+        cds_queue_front:  
+        Prototype:  
+            void *cds_queue_front(CDS_QUEUE *q);  
+        Parameters:  
+            q: Queue pointer.  
+        Return value:  
+            Pointer to the head data (does not dequeue).  
+        Accesses the head element.  
+
+        cds_queue_empty:  
+        Prototype:  
+            int cds_queue_empty(CDS_QUEUE *q);  
+        Parameters:  
+            q: Queue pointer.  
+        Return value:  
+            Returns 1 if the queue is empty, 0 otherwise.  
+        Checks if the queue is empty.  
+
+        cds_queue_close:  
+        Prototype:  
+            void cds_queue_close(CDS_QUEUE *q, CDS_CLOSE_FUNC func);  
+        Parameters:  
+            q: Queue pointer.  
+            func: Data destruction function.  
+        Destroys the entire queue.  
+
+        cds_queue_print:  
+        Prototype:  
+            void cds_queue_print(CDS_QUEUE *q, CDS_PRINT_FUNC func);  
+        Parameters:  
+            q: Queue pointer.  
+            func: Data printing function.  
+        Prints all elements of the queue sequentially (from head to tail).  
+
+    6. CDS_HEAP:  
+    Node Struct Prototype:  
+        struct CDS_HEAP_NODE{  
+            void *key;  
+            void *value;  
+        };  
+    Container Struct Prototype:  
+        typedef struct{  
+            CDS_VECTOR data;  
+            CDS_COMPARE_FUNC cmp;  
+        }CDS_HEAP;  
+    Elements:  
+        data: Dynamic array storing heap nodes.  
+        cmp: Node comparison function.  
+    Min-heap/Max-heap (determined by the comparison function), implemented using a dynamic array.  
+
+    Functions:  
+        cds_heap_init:  
+        Prototype:  
+            void cds_heap_init(CDS_HEAP *heap, CDS_COMPARE_FUNC cmp);  
+        Parameters:  
+            heap: Heap pointer.  
+            cmp: Node comparison function (determines heap type).  
+        Initializes the heap structure.  
+
+        cds_heap_push:  
+        Prototype:  
+            void cds_heap_push(CDS_HEAP *heap, void *key, size_t key_size, void *value, size_t value_size);  
+        Parameters:  
+            heap: Heap pointer.  
+            key: Key pointer.  
+            key_size: Key size.  
+            value: Value pointer.  
+            value_size: Value size.  
+        Inserts a key-value pair into the heap and maintains the heap structure.  
+
+        cds_heap_pop:  
+        Prototype:  
+            void cds_heap_pop(CDS_HEAP *heap, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);  
+        Parameters:  
+            heap: Heap pointer.  
+            key_f: Key destruction function (can be NULL).  
+            value_f: Value destruction function (can be NULL).  
+        Pops the top element from the heap and maintains the heap structure.  
+
+        cds_heap_front:  
+        Prototype:  
+            struct CDS_HEAP_NODE *cds_heap_front(CDS_HEAP *heap);  
+        Parameters:  
+            heap: Heap pointer.  
+        Return value:  
+            Pointer to the top element (does not pop).  
+        Accesses the top element of the heap.  
+
+        cds_heap_empty:  
+        Prototype:  
+            int cds_heap_empty(CDS_HEAP *heap);  
+        Parameters:  
+            heap: Heap pointer.  
+        Return value:  
+            Returns 1 if the heap is empty, 0 otherwise.  
+        Checks if the heap is empty.  
+
+        cds_heap_close:  
+        Prototype:  
+            void cds_heap_close(CDS_HEAP *heap, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);  
+        Parameters:  
+            heap: Heap pointer.  
+            key_f: Key destruction function.  
+            value_f: Value destruction function.  
+        Destroys the entire heap and releases all resources.  
+
+    7. CDS_BSTREE:  
+    Node Struct Prototype:  
+        struct CDS_BSTREE_NODE{  
+            struct CDS_BSTREE_NODE *l, *r;  
+            unsigned char *key;  
+            unsigned char *data;  
+        };  
+    Elements:  
+        l: Left child node.  
+        r: Right child node.  
+        key: Key pointer.  
+        data: Value pointer.  
+    Container Struct Prototype:  
+        typedef struct{  
+            struct CDS_BSTREE_NODE *root;  
+            CDS_COMPARE_FUNC cmp, equal;  
+        }CDS_BSTREE;  
+    Elements:  
+        root: Tree root node.  
+        cmp: Function to compare key values.  
+        equal: Function to determine key equality.  
+    Binary Search Tree implementation.  
+    Note: Functionality is incomplete; not recommended.  
+
+    Functions:  
+        cds_bstree_init:  
+        Prototype:  
+            void cds_bstree_init(CDS_BSTREE *t, CDS_COMPARE_FUNC cmp, CDS_COMPARE_FUNC equal);  
+        Parameters:  
+            t: Tree pointer.  
+            cmp: Key comparison function.  
+            equal: Key equality function.  
+        Initializes the Binary Search Tree.  
+
+        cds_bstree_insert:  
+        Prototype:  
+            void cds_bstree_insert(CDS_BSTREE *t, void *key, size_t key_size, void *value, size_t value_size);  
+        Parameters:  
+            t: Tree pointer.  
+            key: Key pointer.  
+            key_size: Key size.  
+            value: Value pointer.  
+            value_size: Value size.  
+        Inserts a key-value pair into the BST.  
+
+        cds_bstree_find:  
+        Prototype:  
+            struct CDS_BSTREE_NODE **cds_bstree_find(CDS_BSTREE *t, void *key);  
+        Parameters:  
+            t: Tree pointer.  
+            key: Key to find.  
+        Return value:  
+            Pointer to the pointer of the target node (for subsequent operations).  
+        Finds the node with the specified key.  
+
+        cds_bstree_at:  
+        Prototype:  
+            void* cds_bstree_at(CDS_BSTREE *t, void *key, size_t key_size);  
+        Parameters:  
+            t: Tree pointer.  
+            key: Key to find.  
+            key_size: Key size (unused).  
+        Return value:  
+            Value pointer corresponding to the key; returns NULL if not found.  
+        Looks up a value by key.  
+
+        cds_bstree_delete:  
+        Prototype:  
+            void cds_bstree_delete(struct CDS_BSTREE_NODE **node, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);  
+        Parameters:  
+            node: Pointer to the node pointer (usually obtained from `cds_bstree_find`).  
+            key_f: Key destruction function.  
+            value_f: Value destruction function.  
+        Deletes the specified node.  
+
+        cds_bstree_close:  
+        Prototype:  
+            void cds_bstree_close(CDS_BSTREE *t, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);  
+        Parameters:  
+            t: Tree pointer.  
+            key_f: Key destruction function.  
+            value_f: Value destruction function.  
+        Destroys the entire tree.  
+
+        cds_bstree_print:  
+        Prototype:  
+            void cds_bstree_print(CDS_BSTREE *t, CDS_PRINT_FUNC key_print, size_t key_length,  
+                                 CDS_PRINT_FUNC value_print, size_t value_length,  
+                                 CDS_PRINT_FUNC extra_print, size_t extra_length);  
+        Parameters:  
+            t: Tree pointer.  
+            key_print: Key printing function.  
+            key_length: Key print width.  
+            value_print: Value printing function.  
+            value_length: Value print width.  
+            extra_print: Extra information printing function.  
+            extra_length: Extra information width.  
+        Prints the BST in a tree structure (console output).  
+
+        cds_bstree_get_node_num:  
+        Prototype:  
+            size_t cds_bstree_get_node_num(struct CDS_BSTREE_NODE *node);  
+        Parameters:  
+            node: Subtree root node.  
+        Return value:  
+            Total number of nodes in the subtree.  
+        Recursively calculates the number of nodes in a subtree.  
+
+    20. CDS_AVLTREE:  
+    Node Struct Prototype:  
+        struct CDS_AVLTREE_NODE{  
+            struct CDS_AVLTREE_NODE *l, *r;  
+            unsigned char *key;  
+            unsigned char *data;  
+            size_t height;  
+            int lazy_tag:1;  
+        };  
+    Elements:  
+        l: Left child node.  
+        r: Right child node.  
+        key: Key pointer.  
+        data: Value pointer.  
+        height: Node height.  
+        lazy_tag: Lazy update flag.  
+    Container Struct Prototype:  
+        typedef struct{  
+            struct CDS_AVLTREE_NODE *root;  
+            CDS_COMPARE_FUNC cmp, equal;  
+        }CDS_AVLTREE;  
+    Elements:  
+        Inherits from BST, adds `height` and `lazy_tag`.  
+        AVL Balanced Binary Search Tree implementation.  
+
+    Functions:  
+        cds_avltree_init:  
+        Prototype:  
+            void cds_avltree_init(CDS_AVLTREE *t, CDS_COMPARE_FUNC cmp, CDS_COMPARE_FUNC equal);  
+        Parameters: Same as BST.  
+        Initializes the AVL tree.  
+
+        cds_avltree_insert:  
+        Prototype:  
+            void cds_avltree_insert(CDS_AVLTREE *t, void *key, unsigned key_size, void *value, unsigned value_size);  
+        Parameters: Same as BST.  
+        Inserts a key-value pair and automatically balances the tree.  
+
+        cds_avltree_delete:  
+        Prototype:  
+            void cds_avltree_delete(struct CDS_AVLTREE_NODE **node, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);  
+        Parameters: Same as BST.  
+        Deletes a node and automatically balances the tree.  
+
+        cds_avltree_close:  
+        Prototype:  
+            void cds_avltree_close(CDS_AVLTREE *t, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);  
+        Parameters: Same as BST.  
+        Destroys the entire AVL tree.  
+
+        Note: Find functions `cds_avltree_find`/`at` reuse BST implementations via macros.  
+
+    21. CDS_BRTREE:  
+    Node Struct Prototype:  
+        struct CDS_BRTREE_NODE{  
+            struct CDS_BRTREE_NODE *l, *r;  
+            unsigned char *key;  
+            unsigned char *data;  
+            struct CDS_BRTREE_NODE *parent;  
+            int color:1;  
+        };  
+    Elements:  
+        l: Left child node.  
+        r: Right child node.  
+        key: Key pointer.  
+        data: Value pointer.  
+        parent: Parent node pointer.  
+        color: Node color (Red/Black).  
+    Container Struct Prototype:  
+        typedef struct{  
+            struct CDS_BRTREE_NODE *root;  
+            CDS_COMPARE_FUNC cmp, equal;  
+        }CDS_BRTREE;  
+    Elements:  
+        Inherits from BST, adds `parent` and `color`.  
+        Red-Black Tree implementation.  
+
+    Functions:  
+        cds_brtree_init:  
+        Prototype:  
+            void cds_brtree_init(CDS_BRTREE *t, CDS_COMPARE_FUNC cmp, CDS_COMPARE_FUNC equal);  
+        Parameters: Same as BST.  
+        Initializes the Red-Black Tree.  
+
+        cds_brtree_insert:  
+        Prototype:  
+            void cds_brtree_insert(CDS_BRTREE* t, void* key, unsigned key_size, void* value, unsigned value_size);  
+        Parameters: Same as BST.  
+        Inserts a key-value pair and maintains Red-Black Tree properties.  
+
+        cds_brtree_delete:  
+        Prototype:  
+            void cds_brtree_delete(struct CDS_BRTREE_NODE** node);  
+        Parameters:  
+            node: Pointer to the pointer of the node to delete.  
+        Deletes a node and maintains Red-Black Tree properties (Note: Does not automatically handle associated data destruction).  
+
+        cds_brtree_close:  
+        Prototype:  
+            void cds_brtree_close(CDS_BRTREE* t, CDS_CLOSE_FUNC key_f, CDS_CLOSE_FUNC value_f);  
+        Parameters: Same as BST.  
+        Destroys the entire Red-Black Tree.  
+
+        Note: Find functions `cds_brtree_find`/`at` reuse BST implementations via macros.  
+
+B. ccmd  
+    Used to process command-line arguments passed from the terminal.  
+
+    1. ccmd_init:  
+    Prototype:  
+        void ccmd_init(int argc,const char **argv);  
+    Parameters:  
+        argc: Argument count, usually equals `argc` in `main`.  
+        argv: Argument vector, usually equals `argv` in `main`.  
+    Initializes ccmd; must be called before any other function.  
+
+    2. ccmd_set_para:  
+    Prototype:  
+        void ccmd_set_para(const char *sw,int flg,void *data);  
+    Parameters:  
+        sw: Parameter name.  
+        flg: Additional flags. Use `|` to combine one or more of the following:  
+            CCMD_REQUIRED: Must be used; cannot be combined with CCMD_OPTIONAL.  
+            CCMD_OPTIONAL: Optional parameter.  
+            CCMD_STR_PARAM: Parameter is of type `char*`; `data` should be `char**`.  
+            CCMD_INT_PARAM: Parameter is of type `int`; `data` should be `int*`.  
+            CCMD_VARIABLE: Repeatable parameter. When combined with CCMD_STR_PARAM or CCMD_NEXT, `data` is `char***`. When combined with CCMD_INT_PARAM, `data` is `int**`.  
+            CCMD_FUNCTION: If used, executes the function in `data`, which should be of type `CCMD_FUNC`.  
+            CCMD_NEXT: Parameter value is the next argument that cannot be normally processed; `data` should be `char**`.  
+        data: Value pointer.  
+    Sets a parameter.  
+    Note: CCMD_STR_PARAM, CCMD_INT_PARAM, and CCMD_NEXT cannot be combined. CCMD_VARIABLE must be combined with CCMD_STR_PARAM, CCMD_INT_PARAM, or CCMD_NEXT.  
+
+    3. ccmd_deal:  
+    Prototype:  
+        int ccmd_deal(int exit);  
+    Parameters:  
+        exit: If 1, exits on error; if 0, continues execution.  
+    Return value:  
+        Number of errors encountered.  
+    Processes the arguments after all parameters are set.  
+
+    4. ccmd_param_size:  
+    Prototype:  
+        int ccmd_param_size(void *data);  
+    Parameters:  
+        data: Value pointer; only used for parameters modified with CCMD_VARIABLE (type `char**` or `int*`).  
+    Return value:  
+        Number of times the parameter was used.  
+    Gets the count of a parameter's occurrences.  
+
+    5. ccmd_str_param_at:  
+    Prototype:  
+        void *ccmd_str_param_at(void *data,int n);  
+    Parameters:  
+        data: Value pointer; only used for parameters modified with both CCMD_VARIABLE and CCMD_STR_PARAM (type `char***`).  
+        n: Access index.  
+    Return value:  
+        The accessed data, of type `char*`.  
+    Gets the string value at index `n` in `data`.  
+
+    6. ccmd_int_param_at:  
+    Prototype:  
+        int ccmd_int_param_at(void *data,int n);  
+    Parameters:  
+        data: Value pointer; only used for parameters modified with both CCMD_VARIABLE and CCMD_INT_PARAM (type `int**`).  
+        n: Access index.  
+    Return value:  
+        The accessed integer value.  
+    Gets the integer value at index `n` in `data`.  
+
+    7. ccmd_close:  
+    Prototype:  
+        void ccmd_close(void);  
+    Closes ccmd, releasing resources; call when the program ends.  
+
+C. obj_model:  
+    Not tested; currently disabled.

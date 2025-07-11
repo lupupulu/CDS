@@ -869,3 +869,6 @@
     原型：
         void ccmd_close(void);
     关闭ccmd，在结束程序时调用，释放ccmd占用资源。
+
+丙、obj_model：
+    未经过测试，暂不启用。

@@ -6,4 +6,25 @@ There are two parts in CDS:
     1.cds - Data structures library including vector, brtree, heap, etc.
     2.ccmd - Handle parameters from the shell.
 
+obj_model is still developing,had better not use it.
+
 Include the source code directly in your project to use them.
+
+All codes follow the MIT license.
+
+
+====================================================
+
+CDS - 一些用于 C 语言的轻量级开源库
+
+==============
+
+CDS 中有两个部分：
+1.cds - 数据结构库，包括 vector、brtree、heap 等。
+2.ccmd - 处理 shell 中的参数。
+
+obj_model还在开发中，最好不要使用它。
+
+将源代码直接包含在您的项目中以使用它们。
+
+所有代码都遵循 MIT 许可证。
