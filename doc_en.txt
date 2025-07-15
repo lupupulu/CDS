@@ -63,9 +63,16 @@ I. Macros and Special Types:
         typedef void(*CDS_CLOSE_FUNC)(const void*);  
     Parameters:  
         A pointer to the data to be deleted.  
-    Function used to delete data when destroying data structures.  
+    Function used to delete data when destroying data structures.
 
-    8. cds_compare_int/cds_compare_float/cds_compare_string:  
+    8. CDS_CHAR_MAP_FUNC:
+    Prototype:
+        typedef int(*CDS_CHAR_MAP_FUNC)(char);
+    Parameters:
+        A character.
+    Character mapping function type.
+
+    9. cds_compare_int/cds_compare_float/cds_compare_string:  
     Prototype:  
         int cds_compare_int(const void *a,const void *b);  
         int cds_compare_float(const void *a,const void *b);  
@@ -77,7 +84,7 @@ I. Macros and Special Types:
         For string: See return value of `strcmp` (in string.h).  
     Used to compare the size of two data items; can be used directly as CDS_COMPARE_FUNC type functions.  
 
-    9. cds_equal_int/cds_equal_float/cds_equal_string:  
+    10. cds_equal_int/cds_equal_float/cds_equal_string:  
     Prototype:  
         int cds_equal_int(const void *a,const void *b);  
         int cds_equal_float(const void *a,const void *b);  
@@ -89,7 +96,7 @@ I. Macros and Special Types:
     Used to determine if two data items are equal; can be used directly as CDS_COMPARE_FUNC type functions.  
     Note: Floating-point comparisons may have precision errors.  
 
-    10. cds_print_int/cds_print_float/cds_print_string:  
+    11. cds_print_int/cds_print_float/cds_print_string:  
     Prototype:  
         void cds_print_int(const void *a);  
         void cds_print_float(const void *a);  
@@ -102,14 +109,14 @@ I. Macros and Special Types:
         string: Prints string content (null-terminated).  
     Used to output element values in data structure printing functions.  
 
-    11. CDS_PRINT_INT:  
+    12. CDS_PRINT_INT:  
     Prototype: See lines 26-28 in cds.h.  
     Generates an integer printing function with a fixed width (pads with zeros if needed).  
     Example:  
         CDS_PRINT_INT(5) generates function `cds_print_int_5`.  
         For input integer 123, outputs "00123".  
 
-    12. cds_swap:  
+    13. cds_swap:  
     Prototype:  
         void cds_swap(void *a,void *b,size_t size);  
     Parameters:  
@@ -144,6 +151,15 @@ II: Main Structures
             a: Target structure.  
             foot: Stride of the stored type (can often be ignored).  
         Initializes a CDS_VECTOR.  
+
+        cds_vector_get_size:
+        Prototype:
+            size_t cds_vector_get_size(CDS_VECTOR *a);
+        Parameters:
+            a: Target structure.
+        Return value:
+            Array size, same as a->size.
+        Gets the array size.
 
         cds_vector_set_size:  
         Prototype:  
@@ -584,7 +600,91 @@ II: Main Structures
             value_f: Value destruction function.  
         Destroys the entire heap and releases all resources.  
 
-    7. CDS_BSTREE:  
+    7. CDS_TRIE:
+    Struct Prototype:
+        typedef struct{
+            void *data;
+            unsigned char *end;
+            size_t node_cnt;
+            size_t ch_n, nodes_n;
+        }CDS_TRIE;
+    Elements:
+        data: Value pointer.
+        end: End marker.
+        node_cnt: Current node count.
+        ch_n: Maximum number of distinct characters.
+        nodes_n: Maximum number of nodes.
+    Trie structure.
+
+    Macro Definitions:
+        CDS_TRIE_STATE_OK       0b000: Normal end, no special meaning.
+        CDS_TRIE_STATE_REPEAT   0b001: End node already marked.
+        CDS_TRIE_STATE_ERROR_CH 0b010: Mapping function return value outside ch_n range.
+        CDS_TRIE_STATE_NOT_END  0b100: Node matched, but not an end node.
+
+    Functions:
+        cds_trie_init:
+        Prototype:
+            void cds_trie_init(CDS_TRIE *trie, size_t ch_n, size_t nodes_n);
+        Parameters:
+            trie: Trie pointer.
+            ch_n: Maximum number of distinct characters.
+            nodes_n: Maximum number of nodes.
+        Initializes the trie.
+
+        cds_trie_get_next:
+        Prototype:
+            size_t cds_trie_get_next(CDS_TRIE *trie, size_t ch, size_t node);
+        Parameters:
+            trie: Trie pointer.
+            ch: Character for the next node.
+            node: Current node.
+        Return value:
+            Next node index.
+        Gets the next node index.
+
+        cds_trie_add:
+        Prototype:
+            size_t cds_trie_add(CDS_TRIE *trie, const char *str, CDS_CHAR_MAP_FUNC func, int *state);
+        Parameters:
+            trie: Trie pointer.
+            str: String to add.
+            func: Character mapping function.
+            state: State (can be NULL). If not NULL, its value may be one of the macro definitions above.
+        Return value:
+            End node index.
+        Adds a string to the trie.
+
+        cds_trie_find:
+        Prototype:
+            size_t cds_trie_find(CDS_TRIE *trie, const char *str, CDS_CHAR_MAP_FUNC func, int *state);
+        Parameters:
+            trie: Trie pointer.
+            str: String to find.
+            func: Character mapping function.
+            state: State (can be NULL). If not NULL, its value may be one of the macro definitions above.
+        Return value:
+            End node index.
+        Finds a string in the trie.
+
+        cds_trie_get_end:
+        Prototype:
+            int cds_trie_get_end(CDS_TRIE *trie, size_t node);
+        Parameters:
+            trie: Trie pointer.
+            node: Node to access.
+        Return value:
+            End marker, same as `trie->end[node]`. Returns -1 if `node >= trie->node_cnt`.
+        Gets the end marker.
+
+        cds_trie_close:
+        Prototype:
+            void cds_trie_close(CDS_TRIE *trie);
+        Parameters:
+            trie: Trie pointer.
+        Destroys the trie and releases its resources.
+
+    8. CDS_BSTREE:  
     Node Struct Prototype:  
         struct CDS_BSTREE_NODE{  
             struct CDS_BSTREE_NODE *l, *r;  
@@ -692,7 +792,7 @@ II: Main Structures
             Total number of nodes in the subtree.  
         Recursively calculates the number of nodes in a subtree.  
 
-    20. CDS_AVLTREE:  
+    9. CDS_AVLTREE:  
     Node Struct Prototype:  
         struct CDS_AVLTREE_NODE{  
             struct CDS_AVLTREE_NODE *l, *r;  
@@ -744,7 +844,7 @@ II: Main Structures
 
         Note: Find functions `cds_avltree_find`/`at` reuse BST implementations via macros.  
 
-    21. CDS_BRTREE:  
+    10. CDS_BRTREE:  
     Node Struct Prototype:  
         struct CDS_BRTREE_NODE{  
             struct CDS_BRTREE_NODE *l, *r;  

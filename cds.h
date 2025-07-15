@@ -11,6 +11,8 @@ typedef int(*CDS_COMPARE_FUNC)(const void*,const void*);
 typedef void(*CDS_PRINT_FUNC)(const void*);
 typedef void(*CDS_CLOSE_FUNC)(const void*);
 
+typedef int(*CDS_CHAR_MAP_FUNC)(char);
+
 int cds_compare_int(const void *a,const void *b);
 int cds_compare_float(const void *a,const void *b);
 int cds_compare_string(const void *a,const void *b);
@@ -37,6 +39,7 @@ typedef struct{
 #define CDS_VECTOR(tp) CDS_VECTOR
 
 void cds_vector_init(CDS_VECTOR *a,size_t foot);
+size_t cds_vector_get_size(CDS_VECTOR *a);
 void cds_vector_set_size(CDS_VECTOR *a,size_t size);
 void*cds_vector_at(CDS_VECTOR *a,size_t n,size_t foot);
 void cds_vector_push_back(CDS_VECTOR *a,const void *data,size_t size);
@@ -123,6 +126,26 @@ struct CDS_HEAP_NODE *cds_heap_front(CDS_HEAP *heap);
 #define cds_heap_at(h,n,t) cds_heap_front(q)
 int cds_heap_empty(CDS_HEAP *heap);
 void cds_heap_close(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f);
+
+
+typedef struct{
+    void *data;
+    unsigned char *end;
+    size_t node_cnt;
+    size_t ch_n,nodes_n;
+}CDS_TRIE;
+
+#define CDS_TRIE_STATE_OK       0b000
+#define CDS_TRIE_STATE_REPEAT   0b001
+#define CDS_TRIE_STATE_ERROR_CH 0b010
+#define CDS_TRIE_STATE_NOT_END  0b100
+
+void cds_trie_init(CDS_TRIE *trie,size_t ch_n,size_t nodes_n);
+size_t cds_trie_get_next(CDS_TRIE *trie,size_t ch,size_t node);
+size_t cds_trie_add(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state);
+size_t cds_trie_find(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state);
+int cds_trie_get_end(CDS_TRIE *trie,size_t node);
+void cds_trie_close(CDS_TRIE *trie);
 
 
 

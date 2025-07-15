@@ -51,6 +51,9 @@ void cds_vector_init(CDS_VECTOR *a,size_t foot){
     a->real_size=foot;
     a->size=0;
 }
+size_t cds_vector_get_size(CDS_VECTOR *a){
+    return a->size;
+}
 void cds_vector_set_size(CDS_VECTOR *a,size_t size){
     a->data=realloc(a->data,size);
     a->real_size=size;
@@ -410,6 +413,125 @@ void cds_heap_close(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
 }
 
 
+
+inline static size_t cds_trie_get_sizeof(size_t nodes_n){
+    if(nodes_n<1<<8){
+        return 1;
+    }else if(nodes_n<1<<16){
+        return 2;
+    }else if(nodes_n<(size_t)1<<32){
+        return 4;
+    }else{
+        return 8;
+    }
+    return 0;
+}
+
+inline static size_t cds_trie_get_node(CDS_TRIE *trie,size_t ch,size_t node,int stride){
+    void *data=trie->data+(size_t)(trie->ch_n*node+ch)*stride;
+    switch(stride){
+    case 1:return *(unsigned char*)  data;
+    case 2:return *(unsigned short*) data;
+    case 4:return *(unsigned int*)   data;
+    case 8:return *(size_t*)         data;
+    }
+    return 0;
+}
+
+inline static void cds_trie_set_node(CDS_TRIE *trie,size_t ch,size_t node,int stride,size_t value){
+    void *data=trie->data+(trie->ch_n*node+ch)*stride;
+    switch(stride){
+    case 1:*(unsigned char*)  data = value; break;
+    case 2:*(unsigned short*) data = value; break;
+    case 4:*(unsigned int*)   data = value; break;
+    case 8:*(size_t*)         data = value; break;
+    }
+    return ;
+}
+
+void cds_trie_init(CDS_TRIE *trie,size_t ch_n,size_t nodes_n){
+    size_t size=cds_trie_get_sizeof(nodes_n)*nodes_n;
+    trie->end=malloc(nodes_n);
+    memset(trie->end,0,nodes_n);
+    trie->data=malloc(size*ch_n);
+    memset(trie->data,0,size*ch_n);
+    trie->node_cnt=1;
+    trie->ch_n=ch_n;
+}
+
+size_t cds_trie_get_next(CDS_TRIE *trie,size_t ch,size_t node){
+    return cds_trie_get_node(trie,ch,node,cds_trie_get_sizeof(trie->node_cnt));
+}
+
+size_t cds_trie_add(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state){
+    size_t ch=0;
+    int stride=cds_trie_get_sizeof(trie->nodes_n);
+    size_t node=0;
+
+    size_t len=strlen(str);
+    for(size_t i=0;i<len;i++){
+        ch=func(str[i]);
+        if(ch>trie->ch_n){
+            if(state){
+                *state=CDS_TRIE_STATE_ERROR_CH;
+            }
+            return -1;
+        }
+
+        if(!cds_trie_get_node(trie,ch,node,stride)){
+            cds_trie_set_node(trie,ch,node,stride,trie->node_cnt++);
+        }
+        node=cds_trie_get_node(trie,ch,node,stride);
+    }
+    if(trie->end[node]&&state){
+        *state=CDS_TRIE_STATE_REPEAT;
+    }
+    trie->end[node]++;
+    return node;
+}
+
+size_t cds_trie_find(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state){
+    size_t ch=0;
+    int stride=cds_trie_get_sizeof(trie->nodes_n);
+    size_t node=0;
+
+    size_t len=strlen(str),i=0;
+    for(i=0;i<len;i++){
+        ch=func(str[i]);
+        if(ch>trie->ch_n){
+            if(state){
+                *state=CDS_TRIE_STATE_ERROR_CH;
+            }
+            return -1;
+        }
+
+        if(!cds_trie_get_node(trie,ch,node,stride)){
+            break;
+        }
+        node=cds_trie_get_node(trie,ch,node,stride);
+    }
+    if(trie->end[node]){
+        return node;
+    }
+    if(i==len-1&&state){
+        *state=CDS_TRIE_STATE_NOT_END;
+        return node;
+    }
+    return -1;
+}
+
+int cds_trie_get_end(CDS_TRIE *trie,size_t node){
+    if(node>trie->node_cnt){
+        return -1;
+    }
+    return trie->end[node];
+}
+
+void cds_trie_close(CDS_TRIE *trie){
+    free(trie->end);
+    free(trie->data);
+    memset(trie,0,sizeof(CDS_TRIE));
+}
 
 
 

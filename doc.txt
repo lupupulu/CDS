@@ -65,7 +65,14 @@
         一个指向需被删除数据的指针。
     用于删除数据结构时，删除其数据的函数。
 
-    8、cds_compare_int/cds_compare_float/cds_compare_string：
+    8、CDS_CHAR_MAP_FUNC：
+    原型：
+        typedef int(*CDS_CHAR_MAP_FUNC)(char);
+    参数：
+        一个字符。
+    字符映射函数类型。
+
+    9、cds_compare_int/cds_compare_float/cds_compare_string：
     原型：
         int cds_compare_int(const void *a,const void *b);
         int cds_compare_float(const void *a,const void *b);
@@ -77,7 +84,7 @@
         对于string：见strcmp（string.h中）返回值。
     用于比较两数据大小，可直接作为CDS_COMPARE_FUNC类型函数使用。
 
-    9、cds_equal_int/cds_equal_float/cds_equal_string：
+    10、cds_equal_int/cds_equal_float/cds_equal_string：
     原型：
         int cds_equal_int(const void *a,const void *b);
         int cds_equal_float(const void *a,const void *b);
@@ -89,7 +96,7 @@
     用于判断两数据是否相等，可直接作为CDS_COMPARE_FUNC类型函数使用。
     注意：浮点数比较可能存在精度误差。
 
-    10、cds_print_int/cds_print_float/cds_print_string：
+    11、cds_print_int/cds_print_float/cds_print_string：
     原型：
         void cds_print_int(const void *a);
         void cds_print_float(const void *a);
@@ -102,14 +109,14 @@
     string: 打印字符串内容（以'\0'结尾）
     用于数据结构打印函数中输出元素值。
 
-    11、CDS_PRINT_INT：
+    12、CDS_PRINT_INT：
     原型：见cds.h第26-28行。
     生成指定位数的整数打印函数（固定宽度，不足位补0）。
     示例：
         CDS_PRINT_INT(5) 生成函数 cds_print_int_5
         当输入整数123时，输出"00123"。
 
-    12、cds_swap：
+    13、cds_swap：
     原型：
         void cds_swap(void *a,void *b,size_t size);
     参数：
@@ -144,6 +151,15 @@
             a：被访问结构名。
             foot：将储存类型步长（事实上，可以忽略）。
         初始化一个CDS_VECTOR。
+
+        cds_vector_get_size:
+        原型：
+            size_t cds_vector_get_size(CDS_VECTOR *a);
+        参数：
+            a：被访问结构名。
+        返回值：
+            数组大小，与a->size相同。
+        获得数组大小。
 
         cds_vector_set_size：
         原型：
@@ -583,7 +599,91 @@
             value_f：值销毁函数。
         销毁整个堆并释放所有资源。
 
-    7、CDS_BSTREE：
+    7、CDS_TRIE：
+    结构体原型：
+        typedef struct{
+            void *data;
+            unsigned char *end;
+            size_t node_cnt;
+            size_t ch_n,nodes_n;
+        }CDS_TRIE;
+    元素：
+        data：值指针。
+        end：结束标记。
+        node_cnt：当前节点计数。
+        ch_n：最大不同字符数。
+        nodes_n：最大节点数。
+    字典树。
+
+    宏定义：
+        CDS_TRIE_STATE_OK       0b000：正常结束，无意义。
+        CDS_TRIE_STATE_REPEAT   0b001：结束节点已被标记。
+        CDS_TRIE_STATE_ERROR_CH 0b010：映射函数返回值在ch_n范围之外。
+        CDS_TRIE_STATE_NOT_END  0b100：节点匹配，但未结束。
+
+    函数：
+        cds_trie_init：
+        原型：
+            void cds_trie_init(CDS_TRIE *trie,size_t ch_n,size_t nodes_n);
+        参数：
+            trie：字典树指针。
+            ch_n：最大不同字符数。
+            nodes_n：最大节点数。
+        初始化字典树。
+
+        cds_trie_get_next：
+        原型：
+            size_t cds_trie_get_next(CDS_TRIE *trie,size_t ch,size_t node);
+        参数：
+            trie：字典树指针。
+            ch：下一个节点对应字符。
+            node：当前节点。
+        返回值：
+            下个节点。
+        获取下个节点值。
+
+        cds_trie_add：
+        原型：
+            size_t cds_trie_add(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state);
+        参数：
+            trie：字典树指针。
+            str：被加入的字符串。
+            func：字符串映射函数
+            state：状态，可为NULL，若不为NULL，其值可能为以上“宏定义”中的值。
+        返回值：
+            结束节点。
+        向字典树添加一串字符串。
+
+        cds_trie_find：
+        原型：
+            size_t cds_trie_find(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state);
+        参数：
+            trie：字典树指针。
+            str：所查找的字符串。
+            func：字符串映射函数。
+            state：状态，可为NULL，若不为NULL，其值可能为以上“宏定义”中的值。
+        返回值：
+            结束节点。
+        在字典树中查找一串字符串。
+
+        cds_trie_get_end：
+        原型：
+            int cds_trie_get_end(CDS_TRIE *trie,size_t node);
+        参数：
+            trie：字典树指针。
+            node：访问的节点。
+        返回值：
+            结束标记，与trie->end[node]相同，但若node>=trie->node_cnt，返回-1。
+        获得结束标记。
+
+        cds_trie_close：
+        原型：
+            void cds_trie_close(CDS_TRIE *trie);
+        参数：
+            trie：字典树指针。
+        销毁并释放字典树的资源。
+
+    8、CDS_BSTREE：
     结构体原型：
         struct CDS_BSTREE_NODE{
             struct CDS_BSTREE_NODE *l, *r;
@@ -691,7 +791,7 @@
             子树节点总数。
         递归计算子树节点数量。
 
-    20、CDS_AVLTREE：
+    9、CDS_AVLTREE：
     结构体原型：
         struct CDS_AVLTREE_NODE{
             struct CDS_AVLTREE_NODE *l, *r;
@@ -743,7 +843,7 @@
 
         注：查找函数cds_avltree_find/at通过宏复用二叉搜索树的实现。
 
-    21、CDS_BRTREE：
+    10、CDS_BRTREE：
     结构体原型：
         struct CDS_BRTREE_NODE{
             struct CDS_BRTREE_NODE *l, *r;
