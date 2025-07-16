@@ -109,14 +109,23 @@ I. Macros and Special Types:
         string: Prints string content (null-terminated).  
     Used to output element values in data structure printing functions.  
 
-    12. CDS_PRINT_INT:  
+    12. cds_char_map_func:
+    Prototype:
+        int cds_char_map_func(char c);
+    Parameters:
+        ch: Character corresponding to the next node.
+    Return value:
+        Mapped value: A-Z → 0-25, a-z → 26-51, 0-9 → 52-61, '_' → 62.
+    Character mapping function that only maps alphabetic characters, digits, and underscores.
+
+    13. CDS_PRINT_INT:  
     Prototype: See lines 26-28 in cds.h.  
     Generates an integer printing function with a fixed width (pads with zeros if needed).  
     Example:  
         CDS_PRINT_INT(5) generates function `cds_print_int_5`.  
         For input integer 123, outputs "00123".  
 
-    13. cds_swap:  
+    14. cds_swap:  
     Prototype:  
         void cds_swap(void *a,void *b,size_t size);  
     Parameters:  

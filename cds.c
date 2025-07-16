@@ -35,6 +35,19 @@ void cds_print_string(const void *a){
     printf(a);
 }
 
+int cds_char_map_func(char c){
+    if(c>='A'&&c<='Z'){
+        return c-'A';
+    }else if(c>='a'&&c<='z'){
+        return c-'a'+26;
+    }else if(c>='0'&&c<='9'){
+        return c-'0'+52;
+    }else if(c=='_'){
+        return 62;
+    }
+    return -1;
+}
+
 void cds_swap(void *a,void *b,size_t size){
     void *swap=malloc(size);
     memcpy(swap,a,size);

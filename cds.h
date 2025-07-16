@@ -25,6 +25,8 @@ void cds_print_int(const void *a);
 void cds_print_float(const void *a);
 void cds_print_string(const void *a);
 
+int cds_char_map_func(char c);
+
 #define CDS_PRINT_INT(num) \
     inline static void cds_print_int_##num(const void *a)\
     {char print[num+1];memset(print,0,sizeof(print));register int n=*(const int*)a;for(register int i=num-1;i>=0;i--){print[i]=n%10+'0';n/=10;}printf(print);}

@@ -109,14 +109,23 @@
     string: 打印字符串内容（以'\0'结尾）
     用于数据结构打印函数中输出元素值。
 
-    12、CDS_PRINT_INT：
+    12、cds_char_map_func：
+    原型：
+        int cds_char_map_func(char c);
+    参数：
+        ch：下一个节点对应字符。
+    返回值：
+        映射值，A-Z：0-25， a-z：26-51， 0-9：52-61， '_'：62。
+    字符映射函数，映射只有字母，数字，下划线的字符。
+
+    13、CDS_PRINT_INT：
     原型：见cds.h第26-28行。
     生成指定位数的整数打印函数（固定宽度，不足位补0）。
     示例：
         CDS_PRINT_INT(5) 生成函数 cds_print_int_5
         当输入整数123时，输出"00123"。
 
-    13、cds_swap：
+    14、cds_swap：
     原型：
         void cds_swap(void *a,void *b,size_t size);
     参数：

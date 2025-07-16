@@ -104,7 +104,32 @@ inline static void buf2buf(CDS_VECTOR *obj_buf,OBJ_MESH_BUFFER *buf){
 #define KW_MAP_BUMP 22
 #define KW_MAP_D 23
 
-static CDS_AVLTREE keyword_map;
+static unsigned char keyword_trie[64][256],keyword_map[256];
+static unsigned int keyword_node_cnt=1;
+inline static void trie_add(const char *str,unsigned value){
+    size_t now=0;
+    size_t i=0;
+    while(str[i]!='\0'){
+        if(!keyword_trie[cds_char_map_func(str[i])][now]){
+            keyword_trie[cds_char_map_func(str[i])][now]=keyword_node_cnt++;
+        }
+        now=keyword_trie[cds_char_map_func(str[i])][now];
+        i++;
+    }
+    keyword_map[now]=value;
+}
+inline static int trie_find(const char *str){
+    size_t now=0;
+    size_t i=0;
+    while(str[i]!='\0'){
+        if(!keyword_trie[cds_char_map_func(str[i])][now]){
+            break;
+        }
+        now=keyword_trie[cds_char_map_func(str[i])][now];
+        i++;
+    }
+    return keyword_map[now];
+}
 static int init_map;
 static int cmp_keyword(const void *k1,const void *k2){
     const char *kw1=k1,*kw2=k2;
@@ -115,9 +140,7 @@ static int equal_keyword(const void *k1,const void *k2){
     return strcmp(kw1,kw2)==0;
 }
 inline static void init_keywordmap(void){
-    cds_avltree_init(&keyword_map,cmp_keyword,equal_keyword);
-    unsigned int value;
-    #define insert(k,v) value=v,cds_avltree_insert(&keyword_map,k,sizeof(k),&value,sizeof(value))
+    #define insert(k,v) trie_add(k,v)
     insert("v",KW_V);
     insert("vt",KW_VT);
     insert("vn",KW_VN);
@@ -143,14 +166,6 @@ inline static void init_keywordmap(void){
     insert("map_Bump",KW_MAP_BUMP);
     insert("map_d",KW_MAP_D);
     #undef insert
-}
-inline static unsigned int str2keyword(char *str){
-    struct CDS_BSTREE_NODE **r=cds_avltree_find(&keyword_map,str);
-    if(!r){
-        return 0;
-    }
-    struct CDS_BSTREE_NODE *nd=*r;
-    return *((unsigned int*)nd->data);
 }
 
 typedef struct OBJ_MTL_ARR{
@@ -220,7 +235,7 @@ inline static void mtl_load(char *filename,OBJ_MTL_ARR *mtl,CDS_BRTREE *mtl_map)
             continue;
         }
         fscanf(fp,"%s",buf);
-        key=str2keyword(buf);
+        key=trie_find(buf);
 
         switch(key){
         case KW_NEWMTL:
@@ -349,7 +364,7 @@ OBJ_MODEL *obj_load(const char *filename,size_t *n,OBJ_MTL_ARR *mtl){
             continue;
         }
         fscanf(fp,"%s",buf);
-        key=str2keyword(buf);
+        key=trie_find(buf);
         // printf("%d %s\n",kc,buf);
         // kc++;
 
