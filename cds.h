@@ -1,7 +1,7 @@
 #ifndef CDS_H
 #define CDS_H
 
-#include <crtdefs.h>
+#include <stddef.h>
 
 #define cds_at(name,tp,a,n) (*(tp*)cds_##name##_at(a,n,sizeof(tp)))
 #define cds_push(name,a,v) (cds_##name##_push(a,&(v),sizeof(v)))
