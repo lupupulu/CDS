@@ -385,7 +385,7 @@ void cds_heap_pop(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
     cds_vector_pop_back(&heap->data,cds_heap_node_close_func,sizeof(struct CDS_HEAP_NODE));
     size_t lt=1,l,r,j;
     while(lt*2<=heap->data.size&&lt){
-        last=nowl=cds_vector_at(&heap->data,lt-1,sizeof(struct CDS_HEAP_NODE));
+        last=cds_vector_at(&heap->data,lt-1,sizeof(struct CDS_HEAP_NODE));
         l=lt*2;
         nowl=cds_vector_at(&heap->data,l-1,sizeof(struct CDS_HEAP_NODE));
         if(lt*2+1<=heap->data.size){
@@ -423,6 +423,90 @@ void cds_heap_close(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f){
     cds_heap_key_close_f=key_f;
     cds_heap_value_close_f=value_f;
     cds_vector_close(&heap->data,cds_heap_key_close_f,sizeof(struct CDS_HEAP_NODE));
+}
+
+
+void cds_heap_stack_init(CDS_HEAP_STACK *heap,CDS_COMPARE_FUNC cmp,void *data){
+    heap->cnt=0;
+    heap->cmp=cmp;
+    heap->data=data;
+}
+void cds_heap_stack_push(CDS_HEAP_STACK *heap,void *node,size_t size){
+    memcpy(heap->data+size*heap->cnt,node,size);
+    heap->cnt++;
+    size_t l=heap->cnt,i=0;
+    void *now,*last;
+    while(l!=1){
+        if(l%2){
+            i=(l-1)/2;
+        }else{
+            i=l/2;
+        }
+        last=heap->data+(l-1)*size;
+        // last=cds_vector_at(&heap->data,l-1,sizeof(struct CDS_HEAP_NODE));
+        now=heap->data+(i-1)*size;
+        // now=cds_vector_at(&heap->data,i-1,sizeof(struct CDS_HEAP_NODE));
+        if(heap->cmp(now,last)){
+            unsigned char tmp[size];
+            memcpy(tmp,now,size);
+            memcpy(now,last,size);
+            memcpy(last,tmp,size);
+        }
+        l=i;
+    }
+}
+void cds_heap_stack_pop(CDS_HEAP_STACK *heap,CDS_CLOSE_FUNC node_f,size_t size){
+    void *last=heap->data;
+    void *nowl=heap->data+(heap->cnt-1)*size;
+    void *nowr;
+    void *nowj;
+
+    char tmp[size];
+    memcpy(tmp,last,size);
+    memcpy(last,nowl,size);
+    memcpy(nowl,tmp,size);
+
+    heap->cnt--;
+    if(node_f){
+        node_f(heap->data+heap->cnt*size);
+    }
+
+    size_t lt=1,l,r,j;
+    while(lt*2<=heap->cnt&&lt){
+        last=heap->data+(lt-1)*size;
+        l=lt*2;
+        nowl=heap->data+(l-1)*size;
+        if(lt*2+1<=heap->cnt){
+            r=lt*2+1;
+        }else{
+            if(heap->cmp(last,nowl)){
+                memcpy(tmp,last,size);
+                memcpy(last,nowl,size);
+                memcpy(nowl,tmp,size);
+            }
+            break;
+        }
+        nowr=heap->data+(r-1)*size;
+        if(heap->cmp(nowl,nowr)){
+            j=r;
+            nowj=nowr;
+        }else{
+            j=l;
+            nowj=nowl;
+        }
+        if(heap->cmp(last,nowj)){
+            memcpy(tmp,last,size);
+            memcpy(last,nowj,size);
+            memcpy(nowj,tmp,size);
+        }
+        lt=j;
+    }
+}
+void *cds_heap_stack_front(CDS_HEAP_STACK *heap){
+    return heap->data;
+}
+int cds_heap_stack_empty(CDS_HEAP_STACK *heap){
+    return !heap->cnt;
 }
 
 
@@ -547,6 +631,103 @@ void cds_trie_close(CDS_TRIE *trie){
 }
 
 
+
+void cds_trie_stack_init(CDS_TRIE_STACK *trie,size_t ch_n,size_t nodes_n,int bytes,void *data,void *end){
+    trie->bytes=bytes;
+    trie->ch_n=ch_n;
+    trie->nodes_n=nodes_n;
+    trie->node_cnt=1;
+    trie->data=data;
+    trie->end=end;
+}
+
+inline static size_t cds_trie_stack_get_node(CDS_TRIE_STACK *trie,size_t ch,size_t node){
+    void *data=trie->data+(size_t)(trie->ch_n*node+ch)*trie->bytes;
+    switch(trie->bytes){
+    case 1:return *(unsigned char*)  data;
+    case 2:return *(unsigned short*) data;
+    case 4:return *(unsigned int*)   data;
+    case 8:return *(size_t*)         data;
+    }
+    return 0;
+}
+
+inline static void cds_trie_stack_set_node(CDS_TRIE_STACK *trie,size_t ch,size_t node,size_t value){
+    void *data=trie->data+(trie->ch_n*node+ch)*trie->bytes;
+    switch(trie->bytes){
+    case 1:*(unsigned char*)  data = value; break;
+    case 2:*(unsigned short*) data = value; break;
+    case 4:*(unsigned int*)   data = value; break;
+    case 8:*(size_t*)         data = value; break;
+    }
+    return ;
+}
+
+size_t cds_trie_stack_get_next(CDS_TRIE_STACK *trie,size_t ch,size_t node){
+    return cds_trie_stack_get_node(trie,ch,node);
+}
+
+size_t cds_trie_stack_add(CDS_TRIE_STACK *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state){
+    size_t ch=0;
+    size_t node=0;
+
+    size_t len=strlen(str);
+    for(size_t i=0;i<len;i++){
+        ch=func(str[i]);
+        if(ch>trie->ch_n){
+            if(state){
+                *state=CDS_TRIE_STATE_ERROR_CH;
+            }
+            return -1;
+        }
+
+        if(!cds_trie_stack_get_node(trie,ch,node)){
+            cds_trie_stack_set_node(trie,ch,node,trie->node_cnt++);
+        }
+        node=cds_trie_stack_get_node(trie,ch,node);
+    }
+    if(trie->end[node]&&state){
+        *state=CDS_TRIE_STATE_REPEAT;
+    }
+    trie->end[node]++;
+    return node;
+}
+
+size_t cds_trie_stack_find(CDS_TRIE_STACK *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state){
+    size_t ch=0;
+    size_t node=0;
+
+    size_t len=strlen(str),i=0;
+    for(i=0;i<len;i++){
+        ch=func(str[i]);
+        if(ch>trie->ch_n){
+            if(state){
+                *state=CDS_TRIE_STATE_ERROR_CH;
+            }
+            return -1;
+        }
+
+        if(!cds_trie_stack_get_node(trie,ch,node)){
+            break;
+        }
+        node=cds_trie_stack_get_node(trie,ch,node);
+    }
+    if(trie->end[node]){
+        return node;
+    }
+    if(i==len-1&&state){
+        *state=CDS_TRIE_STATE_NOT_END;
+        return node;
+    }
+    return -1;
+}
+
+int cds_trie_stack_get_end(CDS_TRIE_STACK *trie,size_t node){
+    if(node>trie->node_cnt){
+        return -1;
+    }
+    return trie->end[node];
+}
 
 
 

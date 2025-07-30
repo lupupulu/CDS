@@ -130,6 +130,19 @@ int cds_heap_empty(CDS_HEAP *heap);
 void cds_heap_close(CDS_HEAP *heap,CDS_CLOSE_FUNC key_f,CDS_CLOSE_FUNC value_f);
 
 
+typedef struct {
+    size_t cnt;
+    CDS_COMPARE_FUNC cmp;
+    unsigned char *data;
+}CDS_HEAP_STACK;
+void cds_heap_stack_init(CDS_HEAP_STACK *heap,CDS_COMPARE_FUNC cmp,void *data);
+void cds_heap_stack_push(CDS_HEAP_STACK *heap,void *node,size_t size);
+void cds_heap_stack_pop(CDS_HEAP_STACK *heap,CDS_CLOSE_FUNC node_f,size_t size);
+void *cds_heap_stack_front(CDS_HEAP_STACK *heap);
+int cds_heap_stack_empty(CDS_HEAP_STACK *heap);
+
+
+
 typedef struct{
     void *data;
     unsigned char *end;
@@ -148,6 +161,20 @@ size_t cds_trie_add(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *s
 size_t cds_trie_find(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state);
 int cds_trie_get_end(CDS_TRIE *trie,size_t node);
 void cds_trie_close(CDS_TRIE *trie);
+
+
+typedef struct{
+    void *data;
+    unsigned char *end;
+    size_t node_cnt;
+    size_t ch_n,nodes_n;
+    int bytes;
+}CDS_TRIE_STACK;
+void cds_trie_stack_init(CDS_TRIE_STACK *trie,size_t ch_n,size_t nodes_n,int bytes,void *data,void *end);
+size_t cds_trie_stack_get_next(CDS_TRIE_STACK *trie,size_t ch,size_t node);
+size_t cds_trie_stack_add(CDS_TRIE_STACK *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state);
+size_t cds_trie_stack_find(CDS_TRIE_STACK *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *state);
+int cds_trie_stack_get_end(CDS_TRIE_STACK *trie,size_t node);
 
 
 
