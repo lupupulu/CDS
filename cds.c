@@ -591,6 +591,7 @@ size_t cds_trie_find(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *
     size_t ch=0;
     int stride=cds_trie_get_sizeof(trie->nodes_n);
     size_t node=0;
+    size_t ret_node=0;
 
     size_t len=strlen(str),i=0;
     for(i=0;i<len;i++){
@@ -602,11 +603,21 @@ size_t cds_trie_find(CDS_TRIE *trie,const char *str,CDS_CHAR_MAP_FUNC func,int *
             return -1;
         }
 
+        if(trie->end[node]){
+            ret_node=node;
+        }
+
         if(!cds_trie_get_node(trie,ch,node,stride)){
             break;
         }
         node=cds_trie_get_node(trie,ch,node,stride);
     }
+
+    if(trie->end[node]){
+        ret_node=node;
+    }
+    node=ret_node;
+
     if(trie->end[node]){
         return node;
     }
@@ -697,6 +708,8 @@ size_t cds_trie_stack_find(CDS_TRIE_STACK *trie,const char *str,CDS_CHAR_MAP_FUN
     size_t ch=0;
     size_t node=0;
 
+    size_t ret_node=0;
+
     size_t len=strlen(str),i=0;
     for(i=0;i<len;i++){
         ch=func(str[i]);
@@ -707,11 +720,21 @@ size_t cds_trie_stack_find(CDS_TRIE_STACK *trie,const char *str,CDS_CHAR_MAP_FUN
             return -1;
         }
 
+        if(trie->end[node]){
+            ret_node=node;
+        }
+
         if(!cds_trie_stack_get_node(trie,ch,node)){
             break;
         }
         node=cds_trie_stack_get_node(trie,ch,node);
     }
+    
+    if(trie->end[node]){
+        ret_node=node;
+    }
+    node=ret_node;
+
     if(trie->end[node]){
         return node;
     }
