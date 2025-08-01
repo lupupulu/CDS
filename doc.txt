@@ -905,6 +905,141 @@
 
         注：查找函数cds_brtree_find/at通过宏复用二叉搜索树的实现。
 
+    11、CDS_HEAP_STACK：
+    结构体原型：
+        typedef struct {
+            size_t cnt;
+            CDS_COMPARE_FUNC cmp;
+            unsigned char *data;
+        }CDS_HEAP_STACK;
+    元素：
+        cnt：当前堆中元素数量。
+        cmp：节点比较函数（决定堆类型）。
+        data：指向预分配内存块的指针（存储堆元素）。
+    基于静态数组的堆实现（需预分配内存），适用于栈分配或固定内存场景。
+
+    函数：
+        cds_heap_stack_init：
+        原型：
+            void cds_heap_stack_init(CDS_HEAP_STACK *heap, CDS_COMPARE_FUNC cmp, void *data);
+        参数：
+            heap：堆栈指针。
+            cmp：节点比较函数（决定堆类型）。
+            data：预分配内存块指针。
+        初始化堆栈结构（不分配内存，使用外部内存块）。
+
+        cds_heap_stack_push：
+        原型：
+            void cds_heap_stack_push(CDS_HEAP_STACK *heap, void *node, size_t size);
+        参数：
+            heap：堆栈指针。
+            node：待插入元素指针。
+            size：单个元素大小。
+        将元素插入堆中，并维护堆结构（自动上浮调整）。
+
+        cds_heap_stack_pop：
+        原型：
+            void cds_heap_stack_pop(CDS_HEAP_STACK *heap, CDS_CLOSE_FUNC node_f, size_t size);
+        参数：
+            heap：堆栈指针。
+            node_f：元素销毁函数（可为NULL）。
+            size：单个元素大小。
+        弹出堆顶元素，并维护堆结构（自动下沉调整）。若提供node_f，会调用其销毁被弹出元素。
+
+        cds_heap_stack_front：
+        原型：
+            void *cds_heap_stack_front(CDS_HEAP_STACK *heap);
+        参数：
+            heap：堆栈指针。
+        返回值：
+            堆顶元素指针（不弹出）。
+        访问堆顶元素。
+
+        cds_heap_stack_empty：
+        原型：
+            int cds_heap_stack_empty(CDS_HEAP_STACK *heap);
+        参数：
+            heap：堆栈指针。
+        返回值：
+            堆为空返回1，否则返回0。
+        判断堆是否为空。
+
+    12、CDS_TRIE_STACK：
+    结构体原型：
+        typedef struct{
+            void *data;
+            unsigned char *end;
+            size_t node_cnt;
+            size_t ch_n,nodes_n;
+            int bytes;
+        }CDS_TRIE_STACK;
+    元素：
+        data：字典树节点数据存储区（预分配内存）。
+        end：结束标记存储区（预分配内存）。
+        node_cnt：当前节点数量。
+        ch_n：字符集大小。
+        nodes_n：最大节点数。
+        bytes：单个节点索引的字节数（1/2/4/8）。
+    基于静态内存的字典树（需预分配内存），适用于栈分配或固定内存场景。
+
+    函数：
+        cds_trie_stack_init：
+        原型：
+            void cds_trie_stack_init(CDS_TRIE_STACK *trie, size_t ch_n, size_t nodes_n, int bytes, void *data, void *end);
+        参数：
+            trie：字典树指针。
+            ch_n：字符集大小。
+            nodes_n：最大节点数。
+            bytes：节点索引存储字节数（1/2/4/8）。
+            data：预分配的节点数据存储区。
+            end：预分配的结束标记存储区。
+        初始化字典树（使用外部预分配内存）。
+
+        cds_trie_stack_get_next：
+        原型：
+            size_t cds_trie_stack_get_next(CDS_TRIE_STACK *trie, size_t ch, size_t node);
+        参数：
+            trie：字典树指针。
+            ch：字符映射值。
+            node：当前节点索引。
+        返回值：
+            下一节点索引。
+        根据当前节点和字符获取下一节点。
+
+        cds_trie_stack_add：
+        原型：
+            size_t cds_trie_stack_add(CDS_TRIE_STACK *trie, const char *str, CDS_CHAR_MAP_FUNC func, int *state);
+        参数：
+            trie：字典树指针。
+            str：待插入字符串。
+            func：字符映射函数。
+            state：操作状态码（见CDS_TRIE状态宏），可为NULL。
+        返回值：
+            字符串的终止节点索引。
+        向字典树插入字符串（自动扩展节点）。
+
+        cds_trie_stack_find：
+        原型：
+            size_t cds_trie_stack_find(CDS_TRIE_STACK *trie, const char *str, CDS_CHAR_MAP_FUNC func, int *state);
+        参数：
+            trie：字典树指针。
+            str：待查找字符串。
+            func：字符映射函数。
+            state：查找状态码（见CDS_TRIE状态宏），可为NULL。
+        返回值：
+            匹配的终止节点索引（未完全匹配时返回最近的有效节点）。
+        在字典树中查找字符串（支持部分匹配检测）。
+
+        cds_trie_stack_get_end：
+        原型：
+            int cds_trie_stack_get_end(CDS_TRIE_STACK *trie, size_t node);
+        参数：
+            trie：字典树指针。
+            node：目标节点索引。
+        返回值：
+            节点是否为终止节点（0/1），无效节点返回-1。
+        检查节点是否是字符串终止节点。
+
 
 
 

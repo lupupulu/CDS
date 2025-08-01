@@ -904,7 +904,142 @@ II: Main Structures
         Parameters: Same as BST.  
         Destroys the entire Red-Black Tree.  
 
-        Note: Find functions `cds_brtree_find`/`at` reuse BST implementations via macros.  
+        Note: Find functions `cds_brtree_find`/`at` reuse BST implementations via macros. 
+
+    11. CDS_HEAP_STACK:
+    Struct Prototype:
+        typedef struct {
+            size_t cnt;
+            CDS_COMPARE_FUNC cmp;
+            unsigned char *data;
+        }CDS_HEAP_STACK;
+    Elements:
+        cnt: Current number of elements in the heap.
+        cmp: Node comparison function (determines heap type).
+        data: Pointer to pre-allocated memory block (stores heap elements).
+    Heap implementation based on static array (requires pre-allocated memory), suitable for stack allocation or fixed-memory scenarios.
+
+    Functions:
+        cds_heap_stack_init:
+        Prototype:
+            void cds_heap_stack_init(CDS_HEAP_STACK *heap, CDS_COMPARE_FUNC cmp, void *data);
+        Parameters:
+            heap: Heap stack pointer.
+            cmp: Node comparison function (determines heap type).
+            data: Pre-allocated memory block pointer.
+        Initializes the heap stack structure (uses external memory block, no internal allocation).
+
+        cds_heap_stack_push:
+        Prototype:
+            void cds_heap_stack_push(CDS_HEAP_STACK *heap, void *node, size_t size);
+        Parameters:
+            heap: Heap stack pointer.
+            node: Pointer to element to insert.
+            size: Size of single element.
+        Inserts element into heap and maintains heap structure (automatically performs sift-up adjustment).
+
+        cds_heap_stack_pop:
+        Prototype:
+            void cds_heap_stack_pop(CDS_HEAP_STACK *heap, CDS_CLOSE_FUNC node_f, size_t size);
+        Parameters:
+            heap: Heap stack pointer.
+            node_f: Element destruction function (can be NULL).
+            size: Size of single element.
+        Pops top element from heap and maintains heap structure (automatically performs sift-down adjustment). Calls node_f on popped element if provided.
+
+        cds_heap_stack_front:
+        Prototype:
+            void *cds_heap_stack_front(CDS_HEAP_STACK *heap);
+        Parameters:
+            heap: Heap stack pointer.
+        Return value:
+            Pointer to top element (does not pop).
+        Accesses the top heap element.
+
+        cds_heap_stack_empty:
+        Prototype:
+            int cds_heap_stack_empty(CDS_HEAP_STACK *heap);
+        Parameters:
+            heap: Heap stack pointer.
+        Return value:
+            Returns 1 if heap is empty, 0 otherwise.
+        Checks if heap is empty.
+
+    12. CDS_TRIE_STACK:
+    Struct Prototype:
+        typedef struct{
+            void *data;
+            unsigned char *end;
+            size_t node_cnt;
+            size_t ch_n,nodes_n;
+            int bytes;
+        }CDS_TRIE_STACK;
+    Elements:
+        data: Trie node data storage area (pre-allocated).
+        end: End marker storage area (pre-allocated).
+        node_cnt: Current node count.
+        ch_n: Character set size.
+        nodes_n: Maximum node count.
+        bytes: Byte size per node index (1/2/4/8).
+    Trie implementation based on static memory (requires pre-allocation), suitable for stack allocation or fixed-memory scenarios.
+
+    Functions:
+        cds_trie_stack_init:
+        Prototype:
+            void cds_trie_stack_init(CDS_TRIE_STACK *trie, size_t ch_n, size_t nodes_n, int bytes, void *data, void *end);
+        Parameters:
+            trie: Trie pointer.
+            ch_n: Character set size.
+            nodes_n: Maximum node count.
+            bytes: Node index storage byte size (1/2/4/8).
+            data: Pre-allocated node data storage area.
+            end: Pre-allocated end marker storage area.
+        Initializes trie (uses external pre-allocated memory).
+
+        cds_trie_stack_get_next:
+        Prototype:
+            size_t cds_trie_stack_get_next(CDS_TRIE_STACK *trie, size_t ch, size_t node);
+        Parameters:
+            trie: Trie pointer.
+            ch: Character mapping value.
+            node: Current node index.
+        Return value:
+            Next node index.
+        Gets next node based on current node and character.
+
+        cds_trie_stack_add:
+        Prototype:
+            size_t cds_trie_stack_add(CDS_TRIE_STACK *trie, const char *str, CDS_CHAR_MAP_FUNC func, int *state);
+        Parameters:
+            trie: Trie pointer.
+            str: String to insert.
+            func: Character mapping function.
+            state: Operation status code (see CDS_TRIE macros), can be NULL.
+        Return value:
+            Termination node index of the string.
+        Inserts string into trie (automatically extends nodes).
+
+        cds_trie_stack_find:
+        Prototype:
+            size_t cds_trie_stack_find(CDS_TRIE_STACK *trie, const char *str, CDS_CHAR_MAP_FUNC func, int *state);
+        Parameters:
+            trie: Trie pointer.
+            str: String to find.
+            func: Character mapping function.
+            state: Search status code (see CDS_TRIE macros), can be NULL.
+        Return value:
+            Matched termination node index (returns closest valid node on partial match).
+        Searches for string in trie (supports partial match detection).
+
+        cds_trie_stack_get_end:
+        Prototype:
+            int cds_trie_stack_get_end(CDS_TRIE_STACK *trie, size_t node);
+        Parameters:
+            trie: Trie pointer.
+            node: Target node index.
+        Return value:
+            Whether node is termination node (0/1), returns -1 for invalid nodes.
+        Checks if node is a string termination node.
 
 B. ccmd  
     Used to process command-line arguments passed from the terminal.  
