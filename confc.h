@@ -39,7 +39,6 @@ const char *ini_lookup(ini_t *file,const char *section,const char *key);
 ini_section_t *ini_lookup_section(ini_t *file,const char *name);
 const char *ini_lookup_from_section(ini_section_t *section,const char *key);
 
-
 #ifdef CONFC_IMPLEMENTATION
 
 #include <stdio.h>
@@ -50,8 +49,11 @@ const char *ini_lookup_from_section(ini_section_t *section,const char *key);
 #include <fcntl.h>
 #include <sys/stat.h>
 
-
-// darray.h
+#ifdef CONFC_DEBUG_OUTPUT
+#define ini_log_err(...) fprintf(stderr,__VA_ARGS__)
+#else
+#define ini_log_err(...) ((void)0)
+#endif
 
 #ifndef DARRAY_H
 
@@ -72,8 +74,6 @@ inline static int da_clear(void *array);
 typedef darray_t(char) da_str;
 #endif
 
-// confc.c
-
 ini_t ini_load(const char *filename){
     ini_t ret={};
     int fd=open(filename,O_RDONLY);
@@ -88,6 +88,7 @@ ini_t ini_load(const char *filename){
     }
     char *mem=malloc(status.st_size+1);
     if(!mem){
+        ini_log_err("ini_load: malloc %zu bytes failed: %s\n",(size_t)(status.st_size+1),strerror(errno));
         close(fd);
         return ret;
     }
@@ -98,7 +99,7 @@ ini_t ini_load(const char *filename){
             if(n==-1&&errno==EINTR){
                 continue;
             }
-            break; /* 读错误/EOF: 剩余部分清零 */
+            break;
         }
         got+=n;
     }
@@ -197,7 +198,9 @@ static void ini_parse_per_line(ini_t *ret,ini_section_t **now_section,const char
     if(*now_section==NULL){
         ini_init_section(ret,now_section);
     }
-    ini_add_pair(*now_section,&pair);
+    if(*now_section!=NULL){
+        ini_add_pair(*now_section,&pair);
+    }
     da_clear(&key);
     da_clear(&value);
 
@@ -239,10 +242,11 @@ void ini_unload(ini_t *file){
 }
 
 ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
-    /* 值语义: 复制 name, 不接管调用者的内存 */
+
     const char *src_name=section->name?section->name:"";
     char *name=malloc(strlen(src_name)+1);
     if(!name){
+        ini_log_err("ini_add_section: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_name)+1),strerror(errno));
         return NULL;
     }
     strcpy(name,src_name);
@@ -251,6 +255,11 @@ ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
 
     if(file->section_size==0){
         file->sections=malloc(sizeof(ini_section_t));
+        if(!file->sections){
+            ini_log_err("ini_add_section: malloc %zu bytes failed: %s\n",sizeof(ini_section_t),strerror(errno));
+            free(name);
+            return NULL;
+        }
         memcpy(&file->sections[0],&sec,sizeof(ini_section_t));
         file->section_size++;
         return &file->sections[0];
@@ -273,7 +282,13 @@ ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
             r=mid-1;
         }
     }
-    file->sections=realloc(file->sections,(file->section_size+1)*sizeof(ini_section_t));
+    ini_section_t *sections=realloc(file->sections,(file->section_size+1)*sizeof(ini_section_t));
+    if(!sections){
+        ini_log_err("ini_add_section: realloc %zu bytes failed: %s\n",(size_t)((file->section_size+1)*sizeof(ini_section_t)),strerror(errno));
+        free(name);
+        return NULL;
+    }
+    file->sections=sections;
     memmove(&file->sections[l+1],&file->sections[l],(file->section_size-l)*sizeof(ini_section_t));
     memcpy(&file->sections[l],&sec,sizeof(ini_section_t));
     file->section_size++;
@@ -282,17 +297,19 @@ ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
 }
 
 void ini_add_pair(ini_section_t *section,ini_pair_t *pair){
-    /* 值语义: 复制 key/value, 不接管调用者的内存 */
+
     const char *src_key=pair->key?pair->key:"";
     const char *src_value=pair->value?pair->value:"";
     ini_pair_t p=*pair;
     p.key=malloc(strlen(src_key)+1);
     if(!p.key){
+        ini_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_key)+1),strerror(errno));
         return ;
     }
     strcpy(p.key,src_key);
     p.value=malloc(strlen(src_value)+1);
     if(!p.value){
+        ini_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_value)+1),strerror(errno));
         free(p.key);
         return ;
     }
@@ -300,6 +317,12 @@ void ini_add_pair(ini_section_t *section,ini_pair_t *pair){
 
     if(section->pair_size==0){
         section->pairs=malloc(sizeof(ini_pair_t));
+        if(!section->pairs){
+            ini_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",sizeof(ini_pair_t),strerror(errno));
+            free(p.key);
+            free(p.value);
+            return ;
+        }
         memcpy(&section->pairs[0],&p,sizeof(ini_pair_t));
         section->pair_size++;
         return ;
@@ -321,7 +344,14 @@ void ini_add_pair(ini_section_t *section,ini_pair_t *pair){
             r=mid-1;
         }
     }
-    section->pairs=realloc(section->pairs,(section->pair_size+1)*sizeof(ini_pair_t));
+    ini_pair_t *pairs=realloc(section->pairs,(section->pair_size+1)*sizeof(ini_pair_t));
+    if(!pairs){
+        ini_log_err("ini_add_pair: realloc %zu bytes failed: %s\n",(size_t)((section->pair_size+1)*sizeof(ini_pair_t)),strerror(errno));
+        free(p.key);
+        free(p.value);
+        return ;
+    }
+    section->pairs=pairs;
     memmove(&section->pairs[l+1],&section->pairs[l],(section->pair_size-l)*sizeof(ini_pair_t));
     memcpy(&section->pairs[l],&p,sizeof(ini_pair_t));
     section->pair_size++;
@@ -359,7 +389,12 @@ int ini_del_section(ini_t *file,const char *section){
 
     memmove(&file->sections[mid],&file->sections[mid+1],(file->section_size-mid-1)*sizeof(ini_section_t));
     file->section_size--;
-    file->sections=realloc(file->sections,file->section_size*sizeof(ini_section_t));
+    ini_section_t *sections=realloc(file->sections,file->section_size*sizeof(ini_section_t));
+    if(!sections&&file->section_size){
+        ini_log_err("ini_del_section: realloc %zu bytes failed: %s\n",(size_t)(file->section_size*sizeof(ini_section_t)),strerror(errno));
+    }else{
+        file->sections=sections;
+    }
 
     return 0;
 }
@@ -399,11 +434,15 @@ int ini_del_pair_from_section(ini_section_t *section,const char *key){
 
     memmove(&section->pairs[mid],&section->pairs[mid+1],(section->pair_size-mid-1)*sizeof(ini_pair_t));
     section->pair_size--;
-    section->pairs=realloc(section->pairs,section->pair_size*sizeof(ini_pair_t));
+    ini_pair_t *pairs=realloc(section->pairs,section->pair_size*sizeof(ini_pair_t));
+    if(!pairs&&section->pair_size){
+        ini_log_err("ini_del_pair_from_section: realloc %zu bytes failed: %s\n",(size_t)(section->pair_size*sizeof(ini_pair_t)),strerror(errno));
+    }else{
+        section->pairs=pairs;
+    }
 
     return 0;
 }
-
 
 const char *ini_lookup(ini_t *file,const char *section,const char *key){
     ini_section_t *sec=ini_lookup_section(file,section);
@@ -454,10 +493,6 @@ const char *ini_lookup_from_section(ini_section_t *section,const char *key){
     return NULL;
 }
 
-
-
-// darray.c
-
 #ifndef DARRAY_H
 
 int da_init(void *array){
@@ -470,6 +505,7 @@ int da_add(size_t tp_size,void *array,const void *buf){
     if(arr->size+1>=arr->real){
         void *p=realloc(arr->arr,(arr->real*3/2+1)*tp_size);
         if(!p){
+            ini_log_err("da_add: realloc %zu bytes failed: %s\n",(size_t)((arr->real*3/2+1)*tp_size),strerror(errno));
             return 127;
         }
         arr->arr=p;
@@ -489,6 +525,7 @@ int da_clear(void *array){
 
 #endif
 
+#undef ini_log_err
 
 #endif
 

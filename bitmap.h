@@ -1,10 +1,3 @@
-/*
- * bitmap.h — 位图, 单头文件库
- *
- * 使用方式:
- *   #define BITMAP_IMPLEMENTATION
- *   #include "bitmap.h"
- */
 #ifndef BITMAP_H
 #define BITMAP_H
 
@@ -22,25 +15,46 @@ void bm_fake_clear(bitmap_t *bitmap);
 
 int bm_get(bitmap_t *bitmap,size_t i);
 void bm_set(bitmap_t *bitmap,size_t i,int v);
+void bm_push(bitmap_t *bitmap,int v);
 
 #ifdef BITMAP_IMPLEMENTATION
 
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef BITMAP_DEBUG_OUTPUT
+#include <stdio.h>
+#include <errno.h>
+#define bm_log_err(...) fprintf(stderr,__VA_ARGS__)
+#else
+#define bm_log_err(...) ((void)0)
+#endif
+
 #define NOT_LESS_THAN(size,n) (((size)%(n))?(size)/(n)+1:(size)/(n))
 
 void bm_init(bitmap_t *bitmap,size_t size){
+    bitmap->data=NULL;
+    bitmap->size=0;
     if(size==0){
         return ;
     }
-    bitmap->data=malloc(NOT_LESS_THAN(size,32)*sizeof(unsigned));
+    unsigned *data=malloc(NOT_LESS_THAN(size,32)*sizeof(unsigned));
+    if(!data){
+        bm_log_err("bm_init: malloc %zu bytes failed: %s\n",(size_t)(NOT_LESS_THAN(size,32)*sizeof(unsigned)),strerror(errno));
+        return ;
+    }
+    bitmap->data=data;
     bitmap->size=size;
     memset(bitmap->data,0,NOT_LESS_THAN(size,32)*sizeof(unsigned));
 }
 
 void bm_resize(bitmap_t *bitmap,size_t size){
-    bitmap->data=realloc(bitmap->data,NOT_LESS_THAN(size,32)*sizeof(unsigned));
+    unsigned *data=realloc(bitmap->data,NOT_LESS_THAN(size,32)*sizeof(unsigned));
+    if(!data&&size){
+        bm_log_err("bm_resize: realloc %zu bytes failed: %s\n",(size_t)(NOT_LESS_THAN(size,32)*sizeof(unsigned)),strerror(errno));
+        return ;
+    }
+    bitmap->data=data;
     if(size>bitmap->size){
         memset(bitmap->data+NOT_LESS_THAN(bitmap->size,32),0,(NOT_LESS_THAN(size,32)-NOT_LESS_THAN(bitmap->size,32))*sizeof(unsigned));
     }
@@ -78,6 +92,24 @@ void bm_set(bitmap_t *bitmap,size_t i,int v){
         bitmap->data[i/32]=bitmap->data[i/32]|n;
     }
 }
+
+void bm_push(bitmap_t *bitmap,int v){
+    size_t size=bitmap->size+1;
+    if(!size){
+        return ;
+    }
+    if(NOT_LESS_THAN(size,32)>NOT_LESS_THAN(bitmap->size,32)){
+        bm_resize(bitmap,size);
+        if(bitmap->size<size){
+            return ;
+        }
+    }else{
+        bitmap->size=size;
+    }
+    bm_set(bitmap,size-1,v);
+}
+
+#undef bm_log_err
 
 #endif
 
