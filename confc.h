@@ -8,6 +8,15 @@ typedef long ssize_t;
 #endif
 #endif
 
+#include <stdio.h>
+
+
+/* 在以 ':' 分隔的 path 中查找可执行的 target，路径项支持 ~、~用户名、$VAR_NAME、${VAR}；
+   找到时返回 malloc 出来的完整路径（由调用者 free），否则返回 NULL */
+char *confc_find_path(const char *path,const char *target);
+
+
+
 typedef struct {
     char *key;
     char *value;
@@ -28,6 +37,10 @@ ini_t ini_load(const char *filename);
 ini_t ini_load_from_memory(const char *file);
 void ini_unload(ini_t *file);
 
+void ini_write(FILE *fp,ini_t *file);
+void ini_write_fd(int fd,ini_t *file);
+char *ini_write_to_memory(ini_t *file);
+
 ini_section_t *ini_add_section(ini_t *file,ini_section_t *section);
 void ini_add_pair(ini_section_t *section,ini_pair_t *pair);
 
@@ -39,6 +52,62 @@ const char *ini_lookup(ini_t *file,const char *section,const char *key);
 ini_section_t *ini_lookup_section(ini_t *file,const char *name);
 const char *ini_lookup_from_section(ini_section_t *section,const char *key);
 
+
+typedef enum {
+    TOML_STRING,
+    TOML_INTEGER,
+    TOML_FLOAT,
+    TOML_BOOLEAN,
+    TOML_DATETIME,
+    TOML_TABLE,
+    TOML_ARRAY
+}toml_type_t;
+
+typedef struct {
+    char *key;
+    toml_type_t *value;
+}toml_pair_t;
+
+typedef struct {
+    toml_type_t tp;
+    char *str;
+}toml_string_t;
+
+typedef struct {
+    toml_type_t tp;
+    long v;
+}toml_integer_t;
+
+typedef struct {
+    toml_type_t tp;
+    double v;
+}toml_float_t;
+
+typedef struct {
+    toml_type_t tp;
+    int v;
+}toml_boolean_t;
+
+typedef struct {
+    toml_type_t tp;
+    unsigned long time;
+    long offset;
+}toml_datetime_t;
+
+typedef struct {
+    toml_type_t tp;
+    toml_pair_t *pairs;
+    size_t size;
+}toml_table_t;
+
+typedef struct {
+    toml_type_t tp;
+    toml_type_t *items;
+    size_t size;
+}toml_array_t;
+
+
+
 #ifdef CONFC_IMPLEMENTATION
 
 #include <stdio.h>
@@ -47,6 +116,7 @@ const char *ini_lookup_from_section(ini_section_t *section,const char *key);
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pwd.h>
 #include <sys/stat.h>
 
 #ifdef CONFC_DEBUG_OUTPUT
@@ -73,6 +143,207 @@ inline static int da_clear(void *array);
 #define DA_STR_T
 typedef darray_t(char) da_str;
 #endif
+
+
+
+char *confc_find_path(const char *path,const char *target){
+    if(target==NULL||target[0]=='\0'){
+        return NULL;
+    }
+
+    /* target 带 '/' 时本身就是一个路径，不搜索 path */
+    if(target[0]=='/'){
+        struct stat status;
+        if(stat(target,&status)!=0||!S_ISREG(status.st_mode)||access(target,X_OK)!=0){
+            return NULL;
+        }
+        size_t size=strlen(target)+1;
+        char *copy=malloc(size);
+        if(!copy){
+            ini_log_err("confc_find_path: malloc %zu bytes failed: %s\n",size,strerror(errno));
+            return NULL;
+        }
+        memcpy(copy,target,size);
+        return copy;
+    }
+    if(path==NULL){
+        return NULL;
+    }
+
+    da_str dir;
+    da_init(&dir);
+    da_str candidate;
+    da_init(&candidate);
+    da_str name;
+    da_init(&name);
+
+    char *ret=NULL;
+    const char *entry=path;
+    int failed=0;
+
+    while(ret==NULL&&!failed){
+        const char *end=entry;
+        while(*end!='\0'&&*end!=':'){
+            end++;
+        }
+
+        /* 把当前路径项展开到 dir */
+        const char *pos=entry;
+        dir.size=0;
+
+        if(pos<end&&*pos=='~'){
+            const char *user=pos+1;
+            const char *user_end=user;
+            while(user_end<end&&*user_end!='/'){ user_end++; }
+
+            const char *home=NULL;
+            if(user_end==user){
+                home=getenv("HOME");
+                if(home==NULL||home[0]=='\0'){
+                    struct passwd *pw=getpwuid(getuid());
+                    home=pw?pw->pw_dir:NULL;
+                }
+            }else{
+                name.size=0;
+                for(const char *p=user;p<user_end;p++){
+                    failed|=da_add(sizeof(char),&name,p);
+                }
+                failed|=da_add(sizeof(char),&name,"");
+                if(!failed){
+                    struct passwd *pw=getpwnam(name.arr);
+                    home=pw?pw->pw_dir:NULL;
+                }
+            }
+
+            if(home!=NULL&&home[0]!='\0'){
+                for(const char *p=home;*p!='\0';p++){
+                    failed|=da_add(sizeof(char),&dir,p);
+                }
+            }else{
+                /* 取不到家目录（如用户名不存在）时原样保留 */
+                failed|=da_add(sizeof(char),&dir,"~");
+                for(const char *p=user;p<user_end;p++){
+                    failed|=da_add(sizeof(char),&dir,p);
+                }
+            }
+            pos=user_end;
+        }
+
+        while(pos<end){
+            const char *var=NULL;
+            size_t var_size=0;
+            const char *next=pos;
+
+            if(*pos=='$'&&pos+1<end){
+                if(pos[1]=='{'){
+                    const char *close=pos+2;
+                    while(close<end&&*close!='}'){
+                        close++;
+                    }
+                    if(close>pos+2&&close<end){
+                        int ok=((pos[2]>='a'&&pos[2]<='z')||(pos[2]>='A'&&pos[2]<='Z')||pos[2]=='_');
+                        for(const char *p=pos+3;ok&&p<close;p++){
+                            char c=*p;
+                            if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')){
+                                ok=0;
+                            }
+                        }
+                        if(ok){
+                            var=pos+2;
+                            var_size=close-pos-2;
+                            next=close+1;
+                        }
+                    }
+                }else{
+                    char c=pos[1];
+                    if((c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='_'){
+                        const char *p=pos+2;
+                        while(p<end){
+                            c=*p;
+                            if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')){
+                                break;
+                            }
+                            p++;
+                        }
+                        var=pos+1;
+                        var_size=p-pos-1;
+                        next=p;
+                    }
+                }
+            }
+
+            if(var==NULL){
+                /* 其他变量写法、单独的 '$' 一律原样保留 */
+                failed|=da_add(sizeof(char),&dir,pos);
+                pos++;
+                continue;
+            }
+
+            name.size=0;
+            for(const char *p=var;p<var+var_size;p++){
+                failed|=da_add(sizeof(char),&name,p);
+            }
+            failed|=da_add(sizeof(char),&name,"");
+            const char *value=failed?NULL:getenv(name.arr);
+            if(value!=NULL){
+                for(const char *p=value;*p!='\0';p++){
+                    failed|=da_add(sizeof(char),&dir,p);
+                }
+            }
+            pos=next;
+        }
+
+        if(dir.size==0){
+            if(end!=entry){
+                /* 展开后为空的路径项（如引用了未定义的变量）跳过 */
+                if(*end=='\0'){
+                    break;
+                }
+                entry=end+1;
+                continue;
+            }
+            /* 空路径项表示当前目录 */
+            failed|=da_add(sizeof(char),&dir,".");
+        }
+
+        if(!failed){
+            candidate.size=0;
+            for(size_t i=0;i<dir.size;i++){
+                failed|=da_add(sizeof(char),&candidate,&dir.arr[i]);
+            }
+            if(dir.arr[dir.size-1]!='/'){
+                failed|=da_add(sizeof(char),&candidate,"/");
+            }
+            for(const char *p=target;*p!='\0';p++){
+                failed|=da_add(sizeof(char),&candidate,p);
+            }
+            failed|=da_add(sizeof(char),&candidate,"");
+
+            if(!failed){
+                struct stat status;
+                if(stat(candidate.arr,&status)==0&&S_ISREG(status.st_mode)&&access(candidate.arr,X_OK)==0){
+                    ret=candidate.arr;
+                    candidate.arr=NULL;
+                    candidate.size=0;
+                    candidate.real=0;
+                    break;
+                }
+            }
+        }
+
+        if(*end=='\0'){
+            break;
+        }
+        entry=end+1;
+    }
+
+    da_clear(&dir);
+    da_clear(&candidate);
+    da_clear(&name);
+    return ret;
+}
+
+
 
 ini_t ini_load(const char *filename){
     ini_t ret={};
@@ -239,6 +510,136 @@ void ini_unload(ini_t *file){
     free(file->sections);
     file->sections=NULL;
     file->section_size=0;
+}
+
+char *ini_write_to_memory(ini_t *file){
+    if(file==NULL){
+        ini_log_err("ini_write_to_memory: file is nullptr\n");
+        return NULL;
+    }
+
+    da_str mem;
+    da_init(&mem);
+
+    int failed=0;
+    
+    for(size_t i=0;i<file->section_size;i++){
+        ini_section_t *section=&file->sections[i];
+        if(section->name!=NULL&&section->name[0]!='\0'){
+            failed|=da_add(sizeof(char),&mem,"[");
+            for(const char *p=section->name;*p!='\0';p++){
+                failed|=da_add(sizeof(char),&mem,p);
+            }
+            failed|=da_add(sizeof(char),&mem,"]");
+            failed|=da_add(sizeof(char),&mem,"\n");
+        }
+        for(size_t j=0;j<section->pair_size;j++){
+            ini_pair_t *pair=&section->pairs[j];
+            if(pair->key!=NULL){
+                for(const char *p=pair->key;*p!='\0';p++){
+                    failed|=da_add(sizeof(char),&mem,p);
+                }
+            }
+            failed|=da_add(sizeof(char),&mem,"=");
+            if(pair->value!=NULL){
+                for(const char *p=pair->value;*p!='\0';p++){
+                    failed|=da_add(sizeof(char),&mem,p);
+                }
+            }
+            failed|=da_add(sizeof(char),&mem,"\n");
+        }
+    }
+    
+    failed|=da_add(sizeof(char),&mem,"");
+
+    if(failed){
+        ini_log_err("ini_write_to_memory: out of memory\n");
+        da_clear(&mem);
+        return NULL;
+    }
+    return mem.arr;
+}
+
+void ini_write(FILE *fp,ini_t *file){
+    if(fp==NULL||file==NULL){
+        ini_log_err("ini_write: nullptr argument\n");
+        return;
+    }
+
+    for(size_t i=0;i<file->section_size;i++){
+        ini_section_t *section=&file->sections[i];
+        if(section->name!=NULL&&section->name[0]!='\0'){
+            fputc('[',fp);
+            fputs(section->name,fp);
+            fputc(']',fp);
+            fputc('\n',fp);
+        }
+        for(size_t j=0;j<section->pair_size;j++){
+            ini_pair_t *pair=&section->pairs[j];
+            if(pair->key!=NULL){
+                fputs(pair->key,fp);
+            }
+            fputc('=',fp);
+            if(pair->value!=NULL){
+                fputs(pair->value,fp);
+            }
+            fputc('\n',fp);
+        }
+    }
+}
+
+void ini_write_fd(int fd,ini_t *file){
+    if(file==NULL){
+        ini_log_err("ini_write_fd: file is nullptr\n");
+        return;
+    }
+
+    for(size_t i=0;i<file->section_size;i++){
+        ini_section_t *section=&file->sections[i];
+
+        if(section->name!=NULL&&section->name[0]!='\0'){
+            const char *piece[3]={"[",section->name,"]\n"};
+            size_t size[3]={1,strlen(section->name),2};
+
+            for(size_t k=0,off=0;k<3;){
+                if(off==size[k]){
+                    k++;
+                    off=0;
+                    continue;
+                }
+                ssize_t got=write(fd,piece[k]+off,size[k]-off);
+                if(got<=0){
+                    if(got==-1&&errno==EINTR){
+                        continue;
+                    }
+                    return;
+                }
+                off+=got;
+            }
+        }
+
+        for(size_t j=0;j<section->pair_size;j++){
+            ini_pair_t *pair=&section->pairs[j];
+            const char *piece[4]={pair->key?pair->key:"","=",pair->value?pair->value:"","\n"};
+            size_t size[4]={strlen(piece[0]),1,strlen(piece[2]),1};
+
+            for(size_t k=0,off=0;k<4;){
+                if(off==size[k]){
+                    k++;
+                    off=0;
+                    continue;
+                }
+                ssize_t got=write(fd,piece[k]+off,size[k]-off);
+                if(got<=0){
+                    if(got==-1&&errno==EINTR){
+                        continue;
+                    }
+                    return;
+                }
+                off+=got;
+            }
+        }
+    }
 }
 
 ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
