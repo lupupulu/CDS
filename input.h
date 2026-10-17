@@ -3,8 +3,8 @@
 
 void input_set_in(int fd);
 void input_set_out(int fd);
-#define IN_NO_ECHO        0b01
-#define IN_NO_HANDLE_CHAR 0b10
+#define IN_NO_ECHO        0x01
+#define IN_NO_HANDLE_CHAR 0x02
 void input_set_mode(unsigned umask);
 
 int input_basic(char **buf,const char *echobuf);
@@ -334,7 +334,7 @@ int input(char **buf,const char *echobuf){
 
 int deal_keys(da_str *input_buffer,size_t *input_pos,unsigned char c){
     char buf[16]={c};
-    char echo[16]={};
+    char echo[16]={0};
     size_t echo_i=0;
     size_t j=0;
     int ret=0;

@@ -696,20 +696,33 @@ char *confc_parse_esc_all(const char *str){
     return confc_ex_parse_esc_all(str,NULL);
 }
 char *confc_ex_parse_esc_all(const char *str,size_t *n){
-    if(str[0]!='\\'||str[1]=='\0'){
+    if(n!=NULL){
+        *n=0;
+    }
+    if(str==NULL||str[0]!='\\'||str[1]=='\0'){
         return NULL;
     }
 
     if(str[1]=='u'||str[1]=='U'){
-        char *r=confc_ex_parse_esc_unicode(&str[1],n);
-        (*n)++;
+        size_t used=0;
+        char *r=confc_ex_parse_esc_unicode(&str[1],&used);
+        if(r!=NULL&&n!=NULL){
+            *n=used+1;
+        }
         return r;
     }
 
     char *r=malloc(2);
-    r[0]=confc_ex_parse_esc(&str[1],n);
+    if(r==NULL){
+        confc_log_err("confc_ex_parse_esc_all: malloc 2 bytes failed: %s\n",strerror(errno));
+        return NULL;
+    }
+    size_t used=0;
+    r[0]=confc_ex_parse_esc(&str[1],&used);
     r[1]='\0';
-    (*n)++;
+    if(n!=NULL){
+        *n=used+1;
+    }
     return r;
 }
 
@@ -891,13 +904,14 @@ double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict){
     }else{
         const char *p=str;
         int neg=0;
+        int has_us=0;
         if(*p=='+'||*p=='-'){
             neg=(*p=='-');
             p++;
         }
 
         if(strncmp(p,"inf",3)==0){
-            value=INFINITY;
+            value=neg?-INFINITY:INFINITY;
             p+=3;
             complete=1;
         }else if(strncmp(p,"nan",3)==0){
@@ -918,12 +932,12 @@ double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict){
                         break;
                     }
                     underscore=1;
+                    has_us=1;
                     p++;
                     continue;
                 }
                 if(c>='0'&&c<='9'){
                     underscore=0;
-                    value=value*10.0+(double)(c-'0');
                     digits++;
                     p++;
                     continue;
@@ -937,7 +951,6 @@ double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict){
             /* 小数部分 */
             if(!bad&&*p=='.'){
                 p++;
-                double scale=1.0;
                 size_t fdigits=0;
                 underscore=0;
                 while(*p!='\0'){
@@ -948,13 +961,12 @@ double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict){
                             break;
                         }
                         underscore=1;
+                        has_us=1;
                         p++;
                         continue;
                     }
                     if(c>='0'&&c<='9'){
                         underscore=0;
-                        scale*=10.0;
-                        value+=(double)(c-'0')/scale;
                         fdigits++;
                         p++;
                         continue;
@@ -970,12 +982,9 @@ double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict){
             if(!bad&&(*p=='e'||*p=='E')){
                 const char *ep=p;
                 p++;
-                int exp_neg=0;
                 if(*p=='+'||*p=='-'){
-                    exp_neg=(*p=='-');
                     p++;
                 }
-                long exp=0;
                 size_t edigits=0;
                 int ebad=0;
                 underscore=0;
@@ -987,14 +996,12 @@ double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict){
                             break;
                         }
                         underscore=1;
+                        has_us=1;
                         p++;
                         continue;
                     }
                     if(c>='0'&&c<='9'){
                         underscore=0;
-                        if(exp<100000){
-                            exp=exp*10+(c-'0');
-                        }
                         edigits++;
                         p++;
                         continue;
@@ -1003,30 +1010,35 @@ double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict){
                 }
                 if(ebad||underscore||edigits==0){
                     p=ep;
-                }else{
-                    if(exp>1000){
-                        exp=1000;
-                    }
-                    while(exp>0){
-                        if(exp_neg){
-                            value/=10.0;
-                        }else{
-                            value*=10.0;
-                        }
-                        exp--;
-                    }
                 }
             }
 
             if(!bad){
+                /* 语法检查完了，数值交给 strtod，避免自己累加带来的精度偏差 */
                 complete=1;
+                if(!has_us){
+                    value=strtod(str,NULL);
+                }else{
+                    size_t len=(size_t)(p-str);
+                    char *clean=malloc(len+1);
+                    if(clean==NULL){
+                        complete=0;
+                    }else{
+                        size_t k=0;
+                        for(size_t j=0;j<len;j++){
+                            if(str[j]!='_'){
+                                clean[k++]=str[j];
+                            }
+                        }
+                        clean[k]='\0';
+                        value=strtod(clean,NULL);
+                        free(clean);
+                    }
+                }
             }
         }
 
         if(complete){
-            if(neg){
-                value=-value;
-            }
             used=(size_t)(p-str);
         }
     }
@@ -1170,7 +1182,10 @@ unsigned long confc_ex_str_to_date(const char *str,long *time_zone,size_t *n,int
 
 
 ini_t ini_load(const char *filename){
-    ini_t ret={};
+    ini_t ret={0};
+    if(filename==NULL){
+        return ret;
+    }
     int fd=open(filename,O_RDONLY);
     if(fd==-1){
         return ret;
@@ -1233,6 +1248,9 @@ static void ini_parse_per_line(ini_t *ret,ini_section_t **now_section,const char
             i++;
         }
         if(file[i]=='\r'||file[i]=='\0'){
+            while(file[i]!='\n'&&file[i]!='\0'){
+                i++;
+            }
             da_clear(&key);
             return ;
         }
@@ -1260,6 +1278,10 @@ static void ini_parse_per_line(ini_t *ret,ini_section_t **now_section,const char
         i++;
     }
     if(key.size==0){
+        /* 空键（例如 "=value"）：整行丢弃 */
+        while(file[i]!='\n'&&file[i]!='\0'){
+            i++;
+        }
         da_clear(&key);
         return ;
     }
@@ -1288,9 +1310,8 @@ static void ini_parse_per_line(ini_t *ret,ini_section_t **now_section,const char
 
     ini_pair_t pair={.key=key.arr,.value=value.arr};
     if(*now_section==NULL){
-        char *name=malloc(1);
-        *name='\0';
-        ini_section_t section={.name=name};
+        /* 根层的键放在一个名字为 "" 的 section 里；名字由 ini_add_section 复制 */
+        ini_section_t section={.name=""};
         *now_section=ini_add_section(ret,&section);
     }
     ini_add_pair(*now_section,&pair);
@@ -1306,7 +1327,10 @@ static void ini_parse_per_line(ini_t *ret,ini_section_t **now_section,const char
 #undef i
 }
 ini_t ini_load_from_memory(const char *file){
-    ini_t ret={};
+    ini_t ret={0};
+    if(file==NULL){
+        return ret;
+    }
     ini_section_t *now_section=NULL;
 
     size_t i=0;
@@ -1321,6 +1345,9 @@ ini_t ini_load_from_memory(const char *file){
 }
 
 void ini_unload(ini_t *file){
+    if(file==NULL){
+        return ;
+    }
     for(size_t i=0;i<file->section_size;i++){
         free(file->sections[i].name);
         for(size_t j=0;j<file->sections[i].pair_size;j++){
@@ -1465,6 +1492,10 @@ void ini_write_fd(int fd,ini_t *file){
 }
 
 ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
+    if(file==NULL||section==NULL){
+        confc_log_err("ini_add_section: nullptr argument\n");
+        return NULL;
+    }
 
     const char *src_name=section->name?section->name:"";
     char *name=malloc(strlen(src_name)+1);
@@ -1520,6 +1551,10 @@ ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
 }
 
 void ini_add_pair(ini_section_t *section,ini_pair_t *pair){
+    if(section==NULL||pair==NULL){
+        confc_log_err("ini_add_pair: nullptr argument\n");
+        return ;
+    }
 
     const char *src_key=pair->key?pair->key:"";
     const char *src_value=pair->value?pair->value:"";
@@ -1581,6 +1616,9 @@ void ini_add_pair(ini_section_t *section,ini_pair_t *pair){
 }
 
 int ini_del_section(ini_t *file,const char *section){
+    if(file==NULL||section==NULL){
+        return 1;
+    }
     if(file->section_size==0){
         return 1;
     }
@@ -1623,6 +1661,9 @@ int ini_del_section(ini_t *file,const char *section){
 }
 
 int ini_del_pair(ini_t *file,const char *section,const char *key){
+    if(file==NULL||section==NULL||key==NULL){
+        return 1;
+    }
     ini_section_t *sec=ini_lookup_section(file,section);
     if(sec==NULL){
         return 1;
@@ -1631,6 +1672,9 @@ int ini_del_pair(ini_t *file,const char *section,const char *key){
 }
 
 int ini_del_pair_from_section(ini_section_t *section,const char *key){
+    if(section==NULL||key==NULL){
+        return 1;
+    }
     if(section->pair_size==0){
         return 2;
     }
@@ -1676,7 +1720,7 @@ const char *ini_lookup(ini_t *file,const char *section,const char *key){
 }
 
 ini_section_t *ini_lookup_section(ini_t *file,const char *name){
-    if(file->section_size==0){
+    if(file==NULL||name==NULL||file->section_size==0){
         return NULL;
     }
 
@@ -1696,7 +1740,7 @@ ini_section_t *ini_lookup_section(ini_t *file,const char *name){
 }
 
 const char *ini_lookup_from_section(ini_section_t *section,const char *key){
-    if(section->pair_size==0){
+    if(section==NULL||key==NULL||section->pair_size==0){
         return NULL;
     }
 
@@ -1720,7 +1764,10 @@ const char *ini_lookup_from_section(ini_section_t *section,const char *key){
 
 
 toml_t toml_load(const char *filename){
-    toml_t ret={};
+    toml_t ret={0};
+    if(filename==NULL){
+        return ret;
+    }
     int fd=open(filename,O_RDONLY);
     if(fd==-1){
         return ret;
@@ -1758,288 +1805,6 @@ toml_t toml_load(const char *filename){
     return ret;
 }
 
-static void toml_parse_per_pair(toml_t *ret,toml_table_t **now_table,const char *file,size_t *i){
-#define i (*i)
-
-    da_str key;
-    da_init(&key);
-
-    /* 跳过空白 */
-    while(file[i]==' '||file[i]=='\t'||file[i]=='\r'||file[i]=='\n'){
-        i++;
-    }
-
-    /* 空行 / 注释 */
-    if(file[i]=='#'||file[i]=='\0'){
-        while(file[i]!='\0'&&file[i]!='\n'){
-            i++;
-        }
-        da_clear(&key);
-        return ;
-    }
-
-    /* 表头：[name] 或 [[name]] */
-    if(file[i]=='['){
-        int aot=(file[i+1]=='[');
-        i+=aot?2:1;
-
-        while(file[i]==' '||file[i]=='\t'){
-            i++;
-        }
-
-        while(file[i]!='\0'&&file[i]!='\r'&&file[i]!='\n'&&file[i]!=']'){
-            da_add(sizeof(char),&key,&file[i]);
-            i++;
-        }
-        da_add(sizeof(char),&key,"");
-
-        while(key.size>1&&(key.arr[key.size-2]==' '||key.arr[key.size-2]=='\t')){
-            key.size--;
-            key.arr[key.size-1]='\0';
-        }
-
-        if(file[i]==']'){
-            i++;
-            if(aot&&file[i]==']'){
-                i++;
-            }
-        }
-        while(file[i]!='\0'&&file[i]!='\n'&&file[i]!='\r'){
-            i++;
-        }
-
-        /* 同名表复用；[[name]] 暂时也按 [name] 处理（array of tables 还没做逐元素累积） */
-        toml_type_t *found=toml_lookup_table(ret,key.arr);
-        if(found!=NULL&&*found==TOML_TABLE){
-            *now_table=(toml_table_t *)found;
-        }else{
-            toml_table_t *table=malloc(sizeof(toml_table_t));
-            if(table==NULL){
-                confc_log_err("toml_parse_per_pair: malloc %zu bytes failed: %s\n",sizeof(toml_table_t),strerror(errno));
-                da_clear(&key);
-                return ;
-            }
-            *table=(toml_table_t){.tp=TOML_TABLE,.name=key.arr,.pairs=NULL,.size=0};
-            toml_add_table(ret,table);
-            /* name 指向根 pairs 里那份拷贝，key.arr 就可以释放了 */
-            for(size_t k=0;k<ret->size;k++){
-                if(strcmp(ret->pairs[k].key,key.arr)==0){
-                    table->name=ret->pairs[k].key;
-                    break;
-                }
-            }
-            *now_table=table;
-        }
-        da_clear(&key);
-        return ;
-    }
-
-    /* 键：可以带引号，也可以裸写 */
-    if(file[i]=='\"'||file[i]=='\''){
-        char q=file[i];
-        int literal=(q=='\'');
-        i++;
-        while(file[i]!='\0'&&file[i]!=q){
-            if(!literal&&file[i]=='\\'){
-                size_t n=0;
-                char *r=confc_ex_parse_esc_all(&file[i],&n);
-                if(r==NULL){
-                    i++;
-                    continue;
-                }
-                for(size_t k=0;r[k]!='\0';k++){
-                    da_add(sizeof(char),&key,&r[k]);
-                }
-                free(r);
-                i+=n;
-                continue;
-            }
-            da_add(sizeof(char),&key,&file[i]);
-            i++;
-        }
-        if(file[i]==q){
-            i++;
-        }
-    }else{
-        while(file[i]!='\0'&&file[i]!=' '&&file[i]!='\t'&&file[i]!='\r'&&file[i]!='\n'&&file[i]!='='&&file[i]!='#'){
-            da_add(sizeof(char),&key,&file[i]);
-            i++;
-        }
-    }
-    da_add(sizeof(char),&key,"");
-
-    while(file[i]==' '||file[i]=='\t'){
-        i++;
-    }
-
-    if(file[i]!='='){
-        /* 不是 key = value，丢掉这一行 */
-        while(file[i]!='\0'&&file[i]!='\n'){
-            i++;
-        }
-        da_clear(&key);
-        return ;
-    }
-    i++;
-
-    while(file[i]==' '||file[i]=='\t'){
-        i++;
-    }
-
-    /* 值：目前只处理字符串（基本/字面量/多行四种写法） */
-    toml_type_t *v=NULL;
-    da_str value;
-    da_init(&value);
-
-    if(file[i]=='\"'||file[i]=='\''){
-        char q=file[i];
-        int literal=(q=='\'');
-        int multiline=0;
-
-        if(file[i]==q&&file[i+1]==q&&file[i+2]==q&&file[i]!='\0'){
-            multiline=1;
-            i+=3;
-            /* 开头的换行不算内容 */
-            if(file[i]=='\r'){
-                i++;
-            }
-            if(file[i]=='\n'){
-                i++;
-            }
-        }else{
-            i++;
-        }
-
-        while(file[i]!='\0'){
-            if(multiline){
-                if(file[i]==q&&file[i+1]==q&&file[i+2]==q){
-                    i+=3;
-                    break;
-                }
-            }else if(file[i]==q){
-                i++;
-                break;
-            }
-
-            if(!literal&&file[i]=='\\'){
-                size_t n=0;
-                char *r=confc_ex_parse_esc_all(&file[i],&n);
-                if(r==NULL){
-                    i++;
-                    continue;
-                }
-                for(size_t k=0;r[k]!='\0';k++){
-                    da_add(sizeof(char),&value,&r[k]);
-                }
-                free(r);
-                i+=n;
-                continue;
-            }
-
-            /* 单行字符串里不允许裸换行 */
-            if(!multiline&&(file[i]=='\n'||file[i]=='\r')){
-                break;
-            }
-
-            da_add(sizeof(char),&value,&file[i]);
-            i++;
-        }
-
-        da_add(sizeof(char),&value,"");
-        if(value.arr==NULL){
-            confc_log_err("toml_parse_per_pair: out of memory\n");
-            da_clear(&value);
-            da_clear(&key);
-            return ;
-        }
-
-        toml_string_t *str=malloc(sizeof(toml_string_t));
-        if(str==NULL){
-            confc_log_err("toml_parse_per_pair: malloc %zu bytes failed: %s\n",sizeof(toml_string_t),strerror(errno));
-            da_clear(&value);
-            da_clear(&key);
-            return ;
-        }
-        str->tp=TOML_STRING;
-        str->str=value.arr;
-        v=(toml_type_t *)str;
-
-        /* value.arr 已经移交给 str->str */
-        value.arr=NULL;
-        value.size=0;
-        value.real=0;
-    }
-
-    /* 这一行剩下的东西（注释等）跳过 */
-    while(file[i]!='\0'&&file[i]!='\n'){
-        i++;
-    }
-
-    if(v==NULL){
-        da_clear(&value);
-        da_clear(&key);
-        return ;
-    }
-
-    /* 根层的键放到一个名字为 "" 的表里 */
-    if(*now_table==NULL){
-        toml_type_t *found=toml_lookup_table(ret,"");
-        if(found!=NULL&&*found==TOML_TABLE){
-            *now_table=(toml_table_t *)found;
-        }else{
-            toml_table_t *table=malloc(sizeof(toml_table_t));
-            char *empty=malloc(1);
-            if(table==NULL||empty==NULL){
-                confc_log_err("toml_parse_per_pair: malloc failed: %s\n",strerror(errno));
-                free(table);
-                free(empty);
-                free(((toml_string_t *)v)->str);
-                free(v);
-                da_clear(&key);
-                return ;
-            }
-            empty[0]='\0';
-            *table=(toml_table_t){.tp=TOML_TABLE,.name=empty,.pairs=NULL,.size=0};
-            toml_add_table(ret,table);
-            for(size_t k=0;k<ret->size;k++){
-                if(strcmp(ret->pairs[k].key,"")==0){
-                    table->name=ret->pairs[k].key;
-                    break;
-                }
-            }
-            free(empty);
-            *now_table=table;
-        }
-    }
-
-    toml_pair_t pair={.key=key.arr,.value=v};
-    toml_add_pair(*now_table,&pair);
-
-    da_clear(&key);
-    da_clear(&value);
-
-#undef i
-}
-
-toml_t toml_load_from_memory(const char *file){
-    toml_t ret={};
-    if(file==NULL){
-        return ret;
-    }
-
-    toml_table_t *now_table=NULL;
-    size_t i=0;
-    while(file[i]!='\0'){
-        size_t before=i;
-        toml_parse_per_pair(&ret,&now_table,file,&i);
-        if(i==before){
-            i++;   /* 保证一定前进，避免死循环 */
-        }
-    }
-
-    return ret;
-}
-
 static void toml_free_value(toml_type_t *value){
     if(value==NULL){
         return ;
@@ -2074,6 +1839,523 @@ static void toml_free_value(toml_type_t *value){
         free(aot->table);
     }
     free(value);
+}
+
+/* 解析一个字符串字面量（基本/字面量/多行），返回 toml_string_t，失败返回 NULL */
+static toml_type_t *toml_parse_string(const char *file,size_t *i){
+#define i (*i)
+
+    if(file[i]!='\"'&&file[i]!='\''){
+        return NULL;
+    }
+
+    da_str value;
+    da_init(&value);
+
+    char q=file[i];
+    int literal=(q=='\'');
+    int multiline=0;
+
+    if(file[i]==q&&file[i+1]==q&&file[i+2]==q&&file[i]!='\0'){
+        multiline=1;
+        i+=3;
+        /* 开头的换行不算内容 */
+        if(file[i]=='\r'){
+            i++;
+        }
+        if(file[i]=='\n'){
+            i++;
+        }
+    }else{
+        i++;
+    }
+
+    while(file[i]!='\0'){
+        if(multiline){
+            if(file[i]==q&&file[i+1]==q&&file[i+2]==q){
+                i+=3;
+                break;
+            }
+        }else if(file[i]==q){
+            i++;
+            break;
+        }
+
+        if(!literal&&file[i]=='\\'){
+            size_t n=0;
+            char *r=confc_ex_parse_esc_all(&file[i],&n);
+            if(r==NULL){
+                i++;
+                continue;
+            }
+            for(size_t k=0;r[k]!='\0';k++){
+                da_add(sizeof(char),&value,&r[k]);
+            }
+            free(r);
+            i+=n;
+            continue;
+        }
+
+        /* 单行字符串里不允许裸换行 */
+        if(!multiline&&(file[i]=='\n'||file[i]=='\r')){
+            break;
+        }
+
+        da_add(sizeof(char),&value,&file[i]);
+        i++;
+    }
+
+    da_add(sizeof(char),&value,"");
+    if(value.arr==NULL){
+        confc_log_err("toml_parse_string: out of memory\n");
+        return NULL;
+    }
+
+    toml_string_t *str=malloc(sizeof(toml_string_t));
+    if(str==NULL){
+        confc_log_err("toml_parse_string: malloc %zu bytes failed: %s\n",sizeof(toml_string_t),strerror(errno));
+        da_clear(&value);
+        return NULL;
+    }
+    str->tp=TOML_STRING;
+    str->str=value.arr;
+
+    return (toml_type_t *)str;
+
+#undef i
+}
+
+/* 值解析到这儿就算结束了：后面只剩空白、注释、行尾或者数组的分隔符 */
+#define toml_value_end(c) ((c)=='\0'||(c)=='\n'||(c)=='\r'||(c)==' '||(c)=='\t'||(c)=='#'||(c)==','||(c)==']')
+
+static void toml_parse_array(toml_array_t *arr,const char *file,size_t *i);
+
+/* 解析一个值：字符串、数组、布尔、日期、整数、浮点 */
+static toml_type_t *toml_parse_value(const char *file,size_t *i){
+#define i (*i)
+
+    /* 字符串 */
+    if(file[i]=='\"'||file[i]=='\''){
+        return toml_parse_string(file,&i);
+    }
+
+    /* 数组 */
+    if(file[i]=='['){
+        toml_array_t *arr=malloc(sizeof(toml_array_t));
+        if(arr==NULL){
+            confc_log_err("toml_parse_value: malloc %zu bytes failed: %s\n",sizeof(toml_array_t),strerror(errno));
+            return NULL;
+        }
+        arr->tp=TOML_ARRAY;
+        arr->items=NULL;
+        arr->size=0;
+
+        toml_parse_array(arr,file,&i);
+        return (toml_type_t *)arr;
+    }
+
+    /* 布尔 */
+    if(strncmp(&file[i],"true",4)==0&&toml_value_end(file[i+4])){
+        toml_boolean_t *b=malloc(sizeof(toml_boolean_t));
+        if(b==NULL){
+            confc_log_err("toml_parse_value: malloc %zu bytes failed: %s\n",sizeof(toml_boolean_t),strerror(errno));
+            return NULL;
+        }
+        b->tp=TOML_BOOLEAN;
+        b->v=1;
+        i+=4;
+        return (toml_type_t *)b;
+    }
+    if(strncmp(&file[i],"false",5)==0&&toml_value_end(file[i+5])){
+        toml_boolean_t *b=malloc(sizeof(toml_boolean_t));
+        if(b==NULL){
+            confc_log_err("toml_parse_value: malloc %zu bytes failed: %s\n",sizeof(toml_boolean_t),strerror(errno));
+            return NULL;
+        }
+        b->tp=TOML_BOOLEAN;
+        b->v=0;
+        i+=5;
+        return (toml_type_t *)b;
+    }
+
+    /* 日期是 YYYY-...，本地时间（07:32:00）暂时不支持；这两种都不当数字解析 */
+    int date_like=0;
+    if(file[i]>='0'&&file[i]<='9'&&file[i+1]>='0'&&file[i+1]<='9'&&file[i+2]>='0'&&file[i+2]<='9'&&file[i+3]>='0'&&file[i+3]<='9'&&file[i+4]=='-'){
+        date_like=1;
+
+        size_t n=0;
+        int err=0;
+        long tz=0;
+        unsigned long stamp=confc_ex_str_to_date(&file[i],&tz,&n,&err);
+        if(err!=2&&n>0&&toml_value_end(file[i+n])){
+            toml_datetime_t *dt=malloc(sizeof(toml_datetime_t));
+            if(dt==NULL){
+                confc_log_err("toml_parse_value: malloc %zu bytes failed: %s\n",sizeof(toml_datetime_t),strerror(errno));
+                return NULL;
+            }
+            dt->tp=TOML_DATETIME;
+            dt->time=stamp;
+            dt->offset=tz;
+            i+=n;
+            return (toml_type_t *)dt;
+        }
+    }
+    if(file[i]>='0'&&file[i]<='9'&&file[i+1]>='0'&&file[i+1]<='9'&&file[i+2]==':'){
+        date_like=1;
+    }
+    if(date_like){
+        return NULL;
+    }
+
+    size_t n=0;
+    int err=0;
+
+    /* 整数 */
+    long iv=confc_ex_str_to_int(&file[i],&n,&err,1);
+    if(err!=2&&n>0&&toml_value_end(file[i+n])){
+        toml_integer_t *it=malloc(sizeof(toml_integer_t));
+        if(it==NULL){
+            confc_log_err("toml_parse_value: malloc %zu bytes failed: %s\n",sizeof(toml_integer_t),strerror(errno));
+            return NULL;
+        }
+        it->tp=TOML_INTEGER;
+        it->v=iv;
+        i+=n;
+        return (toml_type_t *)it;
+    }
+
+    /* 浮点（含 inf / nan） */
+    double fv=confc_ex_str_to_float(&file[i],&n,&err,1);
+    if(err!=2&&n>0&&toml_value_end(file[i+n])){
+        toml_float_t *ft=malloc(sizeof(toml_float_t));
+        if(ft==NULL){
+            confc_log_err("toml_parse_value: malloc %zu bytes failed: %s\n",sizeof(toml_float_t),strerror(errno));
+            return NULL;
+        }
+        ft->tp=TOML_FLOAT;
+        ft->v=fv;
+        i+=n;
+        return (toml_type_t *)ft;
+    }
+
+    return NULL;
+
+#undef i
+}
+
+/* 解析一个数组，元素交给 toml_parse_value（所以数组里可以再套数组） */
+static void toml_parse_array(toml_array_t *arr,const char *file,size_t *i){
+#define i (*i)
+
+    if(file[i]!='['){
+        return ;
+    }
+    i++;
+
+    for(;;){
+        /* 跳过空白和元素之间的逗号 */
+        while(file[i]==' '||file[i]=='\t'||file[i]=='\r'||file[i]=='\n'||file[i]==','){
+            i++;
+        }
+        if(file[i]=='\0'||file[i]==']'){
+            break;
+        }
+
+        toml_type_t *v=toml_parse_value(file,&i);
+        if(v==NULL){
+            break;
+        }
+
+        toml_type_t **items=realloc(arr->items,(arr->size+1)*sizeof(toml_type_t *));
+        if(items==NULL){
+            confc_log_err("toml_parse_array: realloc %zu bytes failed: %s\n",(size_t)((arr->size+1)*sizeof(toml_type_t *)),strerror(errno));
+            toml_free_value(v);
+            break;
+        }
+        arr->items=items;
+        arr->items[arr->size++]=v;
+    }
+
+    if(file[i]==']'){
+        i++;
+    }
+
+#undef i
+}
+
+static void toml_commit_table(toml_t *ret,toml_table_t **now_table){
+    toml_table_t *cur=*now_table;
+    if(cur==NULL){
+        return ;
+    }
+    *now_table=NULL;
+
+    char *old_name=(char *)cur->name;
+
+    if(cur->tp!=TOML_ARRAY_OF_TABLES){
+        toml_add_table(ret,cur);
+        free(old_name);
+        return ;
+    }
+
+    toml_array_of_tables_t *aot=malloc(sizeof(toml_array_of_tables_t));
+    struct toml_table_item_t *items=malloc(sizeof(struct toml_table_item_t));
+    if(aot==NULL||items==NULL){
+        confc_log_err("toml_commit_table: malloc failed: %s\n",strerror(errno));
+        free(aot);
+        free(items);
+        cur->tp=TOML_TABLE;
+        toml_free_value((toml_type_t *)cur);
+        free(old_name);
+        return ;
+    }
+
+    aot->tp=TOML_ARRAY_OF_TABLES;
+    aot->name=old_name;
+    aot->table=items;
+    aot->size=1;
+    items[0].pairs=cur->pairs;
+    items[0].size=cur->size;
+
+    /* 同名的是普通 table：这一段没地方放，直接释放 */
+    toml_type_t *existing=toml_lookup_table(ret,old_name);
+    if(existing!=NULL&&*existing!=TOML_ARRAY_OF_TABLES){
+        confc_log_err("toml_commit_table: \"%s\" already exists as a table\n",old_name);
+        cur->tp=TOML_TABLE;
+        toml_free_value((toml_type_t *)cur);
+        free(aot->table);
+        free(aot);
+        free(old_name);
+        return ;
+    }
+
+    toml_add_table(ret,(toml_table_t *)aot);
+
+    free(cur);
+    free(old_name);
+}
+
+static void toml_parse_per_pair(toml_t *ret,toml_table_t **now_table,const char *file,size_t *i){
+#define i (*i)
+
+    da_str key;
+    da_init(&key);
+
+    /* 跳过空白 */
+    while(file[i]==' '||file[i]=='\t'||file[i]=='\r'||file[i]=='\n'){
+        i++;
+    }
+
+    /* 空行 / 注释 */
+    if(file[i]=='#'||file[i]=='\0'){
+        while(file[i]!='\0'&&file[i]!='\n'){
+            i++;
+        }
+        da_clear(&key);
+        return ;
+    }
+
+    /* 表头：[name] 或 [[name]]；先把上一段表挂到根上，再开一个新的 */
+    if(file[i]=='['){
+        int aot=(file[i+1]=='[');
+        i+=aot?2:1;
+
+        /* 表名：允许 a.b 这样的多段，也允许带引号的段；这里拼成一层名字（如 "a.b"） */
+        for(;;){
+            while(file[i]==' '||file[i]=='\t'){
+                i++;
+            }
+
+            if(file[i]=='\"'||file[i]=='\''){
+                size_t used=0;
+                toml_type_t *s=toml_parse_string(&file[i],&used);
+                if(s!=NULL){
+                    for(const char *q=((toml_string_t *)s)->str;*q!='\0';q++){
+                        da_add(sizeof(char),&key,q);
+                    }
+                    free(((toml_string_t *)s)->str);
+                    free(s);
+                }
+                i+=used;
+            }else{
+                while(file[i]!='\0'&&file[i]!='.'&&file[i]!=']'&&file[i]!='\r'&&file[i]!='\n'&&file[i]!=' '&&file[i]!='\t'){
+                    da_add(sizeof(char),&key,&file[i]);
+                    i++;
+                }
+            }
+
+            while(file[i]==' '||file[i]=='\t'){
+                i++;
+            }
+            if(file[i]!='.'){
+                break;
+            }
+            i++;
+            da_add(sizeof(char),&key,".");
+        }
+        da_add(sizeof(char),&key,"");
+
+        if(file[i]==']'){
+            i++;
+            if(aot&&file[i]==']'){
+                i++;
+            }
+        }
+        while(file[i]!='\0'&&file[i]!='\n'&&file[i]!='\r'){
+            i++;
+        }
+
+        toml_commit_table(ret,now_table);
+
+        toml_table_t *table=malloc(sizeof(toml_table_t));
+        if(table==NULL){
+            confc_log_err("toml_parse_per_pair: malloc %zu bytes failed: %s\n",sizeof(toml_table_t),strerror(errno));
+            da_clear(&key);
+            return ;
+        }
+        /* tp 顺便当标记：TOML_ARRAY_OF_TABLES 表示这一段来自 [[name]]，
+           toml_commit_table 会据此把它包成 AOT 的一个元素 */
+        *table=(toml_table_t){.tp=aot?TOML_ARRAY_OF_TABLES:TOML_TABLE,.name=key.arr,.pairs=NULL,.size=0};
+        *now_table=table;
+        return ;
+    }
+
+    /* 键：可以带引号，也可以裸写 */
+    if(file[i]=='\"'||file[i]=='\''){
+        char q=file[i];
+        int literal=(q=='\'');
+        i++;
+        while(file[i]!='\0'&&file[i]!=q){
+            if(literal||file[i]!='\\'){
+                da_add(sizeof(char),&key,&file[i]);
+                i++;
+                continue;
+            }
+
+            size_t n=0;
+            char *r=confc_ex_parse_esc_all(&file[i],&n);
+            if(r==NULL){
+                i++;
+                continue;
+            }
+            for(size_t k=0;r[k]!='\0';k++){
+                da_add(sizeof(char),&key,&r[k]);
+            }
+            free(r);
+            i+=n;
+        }
+        if(file[i]==q){
+            i++;
+        }
+    }else{
+        while(file[i]!='\0'&&file[i]!=' '&&file[i]!='\t'&&file[i]!='\r'&&file[i]!='\n'&&file[i]!='='&&file[i]!='#'){
+            da_add(sizeof(char),&key,&file[i]);
+            i++;
+        }
+    }
+    da_add(sizeof(char),&key,"");
+
+    while(file[i]==' '||file[i]=='\t'){
+        i++;
+    }
+
+    if(file[i]!='='){
+        /* 不是 key = value，丢掉这一行 */
+        while(file[i]!='\0'&&file[i]!='\n'){
+            i++;
+        }
+        da_clear(&key);
+        return ;
+    }
+    i++;
+
+    while(file[i]==' '||file[i]=='\t'){
+        i++;
+    }
+
+    /* 值：交给 toml_parse_value 统一解析 */
+    toml_type_t *v=toml_parse_value(file,&i);
+
+    /* 这一行剩下的东西（注释等）跳过 */
+    while(file[i]!='\0'&&file[i]!='\n'){
+        i++;
+    }
+
+    if(v==NULL){
+        da_clear(&key);
+        return ;
+    }
+
+    /* 根层的键放到一个名字为 "" 的表里 */
+    if(*now_table==NULL){
+        toml_table_t *table=malloc(sizeof(toml_table_t));
+        char *name=malloc(1);
+        if(table==NULL||name==NULL){
+            confc_log_err("toml_parse_per_pair: malloc failed: %s\n",strerror(errno));
+            free(table);
+            free(name);
+            toml_free_value(v);
+            da_clear(&key);
+            return ;
+        }
+        name[0]='\0';
+        *table=(toml_table_t){.tp=TOML_TABLE,.name=name,.pairs=NULL,.size=0};
+        *now_table=table;
+    }
+
+    /* dotted key：a.b.c = v 的表名直接就是 a.b（根下只有一层表，不嵌套） */
+    char *dotp=strrchr(key.arr,'.');
+    char *part=key.arr;
+    toml_table_t *target=*now_table;
+    if(dotp!=NULL&&dotp!=key.arr){
+        *dotp='\0';
+        part=dotp+1;
+
+        toml_type_t *sub=toml_lookup_table(ret,key.arr);
+        if(sub==NULL||*sub!=TOML_TABLE){
+            toml_table_t *table=malloc(sizeof(toml_table_t));
+            if(table==NULL){
+                confc_log_err("toml_parse_per_pair: malloc %zu bytes failed: %s\n",sizeof(toml_table_t),strerror(errno));
+                toml_free_value(v);
+                da_clear(&key);
+                return ;
+            }
+            *table=(toml_table_t){.tp=TOML_TABLE,.name=key.arr,.pairs=NULL,.size=0};
+
+            toml_add_table(ret,table);   /* name 会被拷到根上并把 table->name 指回去 */
+            sub=(toml_type_t *)table;
+        }
+        target=(toml_table_t *)sub;
+    }
+
+    toml_pair_t pair={.key=part,.value=v};
+    toml_add_pair(target,&pair);
+
+    da_clear(&key);
+
+#undef i
+}
+
+toml_t toml_load_from_memory(const char *file){
+    toml_t ret={0};
+    if(file==NULL){
+        return ret;
+    }
+
+    toml_table_t *now_table=NULL;
+    size_t i=0;
+    while(file[i]!='\0'){
+        size_t before=i;
+        toml_parse_per_pair(&ret,&now_table,file,&i);
+        if(i==before){
+            i++;   /* 保证一定前进，避免死循环 */
+        }
+    }
+
+    /* 收尾：把最后一段表挂到根上 */
+    toml_commit_table(&ret,&now_table);
+
+    return ret;
 }
 
 void toml_unload(toml_t *file){
@@ -2126,6 +2408,11 @@ void toml_add_table(toml_t *file,toml_table_t *table){
         }
         file->pairs[0].key=key;
         file->pairs[0].value=(toml_type_t *)table;
+        if(table->tp==TOML_TABLE){
+            table->name=key;
+        }else{
+            ((toml_array_of_tables_t *)table)->name=key;
+        }
         file->size++;
         return;
     }
@@ -2136,6 +2423,11 @@ void toml_add_table(toml_t *file,toml_table_t *table){
         mid=l+(r-l)/2;
         int res=strcmp(file->pairs[mid].key,key);
         if(res==0){
+            if(file->pairs[mid].value==(toml_type_t *)table){
+                /* 同一个对象重复加入：已经在根上，直接忽略 */
+                free(key);
+                return;
+            }
             if(table->tp==TOML_ARRAY_OF_TABLES){
                 /* 同名：已有 AOT 就把新对象里的元素并进数组；已有 table 就报错 */
                 if(file->pairs[mid].value!=NULL&&*file->pairs[mid].value==TOML_ARRAY_OF_TABLES){
@@ -2146,6 +2438,7 @@ void toml_add_table(toml_t *file,toml_table_t *table){
                         if(items==NULL){
                             confc_log_err("toml_add_table: realloc %zu bytes failed: %s\n",(size_t)((dst->size+src->size)*sizeof(struct toml_table_item_t)),strerror(errno));
                             free(key);
+                            toml_free_value((toml_type_t *)table);
                             return;
                         }
                         dst->table=items;
@@ -2159,13 +2452,20 @@ void toml_add_table(toml_t *file,toml_table_t *table){
                     free(src);
                 }else{
                     confc_log_err("toml_add_table: \"%s\" already exists as a table, cannot add array of tables\n",key);
+                    toml_free_value((toml_type_t *)table);
                 }
                 free(key);
                 return;
             }
             confc_log_err("toml_add_table: duplicate key \"%s\", overwritten\n",key);
             free(key);
+            toml_free_value(file->pairs[mid].value);   /* 覆盖前把旧值释放掉 */
             file->pairs[mid].value=(toml_type_t *)table;
+            if(table->tp==TOML_TABLE){
+                table->name=file->pairs[mid].key;
+            }else{
+                ((toml_array_of_tables_t *)table)->name=file->pairs[mid].key;
+            }
             return;
         }else if(res<0){
             l=mid+1;
@@ -2184,6 +2484,11 @@ void toml_add_table(toml_t *file,toml_table_t *table){
     memmove(&file->pairs[l+1],&file->pairs[l],(file->size-l)*sizeof(toml_pair_t));
     file->pairs[l].key=key;
     file->pairs[l].value=(toml_type_t *)table;
+    if(table->tp==TOML_TABLE){
+        table->name=key;
+    }else{
+        ((toml_array_of_tables_t *)table)->name=key;
+    }
     file->size++;
 }
 
@@ -2222,6 +2527,9 @@ void toml_add_pair(toml_table_t *table,toml_pair_t *pair){
         if(res==0){
             confc_log_err("toml_add_pair: duplicate key \"%s\", overwritten\n",key);
             free(key);
+            if(table->pairs[mid].value!=pair->value){
+                toml_free_value(table->pairs[mid].value);
+            }
             table->pairs[mid].value=pair->value;
             return;
         }else if(res<0){
@@ -2327,37 +2635,57 @@ toml_type_t *toml_lookup_from_array_of_tables(toml_array_of_tables_t *table,size
 
 #ifndef DARRAY_H
 
+/* 动态数组头：不直接按具体元素类型去别名访问调用方的 darray_t(T)，
+   而是用 memcpy 读写，避免 -O2/-O3 下严格别名优化导致的错误。 */
+typedef struct {
+    void *arr;
+    size_t size;
+    size_t real;
+} da_generic_t;
+
+static void da_load_header(const void *array,da_generic_t *header){
+    memcpy(header,array,sizeof(*header));
+}
+static void da_store_header(void *array,const da_generic_t *header){
+    memcpy(array,header,sizeof(*header));
+}
+
 int da_init(void *array){
-    memset(array,0,sizeof(darray_t(void)));
+    memset(array,0,sizeof(da_generic_t));
     return 0;
 }
 
 int da_add(size_t tp_size,void *array,const void *buf){
-    darray_t(void) *arr=array;
-    if(arr->size+1>=arr->real){
-        void *p=realloc(arr->arr,(arr->real*3/2+1)*tp_size);
+    da_generic_t header;
+    da_load_header(array,&header);
+    if(header.size+1>=header.real){
+        size_t real=header.real*3/2+1;
+        void *p=realloc(header.arr,real*tp_size);
         if(!p){
-            confc_log_err("da_add: realloc %zu bytes failed: %s\n",(size_t)((arr->real*3/2+1)*tp_size),strerror(errno));
+            confc_log_err("da_add: realloc %zu bytes failed: %s\n",real*tp_size,strerror(errno));
             return 127;
         }
-        arr->arr=p;
-        arr->real=arr->real*3/2+1;
+        header.arr=p;
+        header.real=real;
     }
-    memcpy(arr->arr+arr->size*tp_size,buf,tp_size);
-    arr->size++;
+    memcpy((char *)header.arr+header.size*tp_size,buf,tp_size);
+    header.size++;
+    da_store_header(array,&header);
     return 0;
 }
 
 int da_clear(void *array){
-    darray_t(void) *arr=array;
-    free(arr->arr);
-    memset(arr,0,sizeof(darray_t(void)));
+    da_generic_t header;
+    da_load_header(array,&header);
+    free(header.arr);
+    memset(array,0,sizeof(da_generic_t));
     return 0;
 }
 
 #endif
 
 #undef confc_log_err
+#undef toml_value_end
 
 #endif
 
