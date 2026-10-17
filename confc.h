@@ -11,29 +11,158 @@ typedef long ssize_t;
 #include <stdio.h>
 
 
-/* 在以 ':' 分隔的 path 中查找可执行的 target，路径项支持 ~、~用户名、$VAR_NAME、${VAR}；
-   confc_find_path：找到时返回 malloc 出来的完整路径（由调用者 free），否则返回 NULL
-   confc_ex_find_path：同上，另外把命中的那个路径项在 path 里的起始指针写到 *start
-                      （未命中、或 target 本身是绝对路径时写 NULL） */
+/**
+ * @brief 在以 ':' 分隔的 path 中查找可执行的 target。
+ *
+ * 每个路径项支持 ~、~用户名、$VAR_NAME 和 ${VAR} 展开；命中条件是普通文件
+ * 且对当前用户可执行。
+ *
+ * @param[in] path   ':' 分隔的目录列表
+ * @param[in] target 要查找的可执行文件名；含 '/' 时按路径本身判断，不搜索 path
+ * @return malloc 出来的完整路径，由调用者 free；找不到返回 NULL
+ */
 char *confc_find_path(const char *path,const char *target);
+
+/**
+ * @brief 同 confc_find_path，另外报告命中的是 path 里的哪一项。
+ *
+ * @param[in]  path   ':' 分隔的目录列表
+ * @param[in]  target 要查找的可执行文件名
+ * @param[out] start  命中时指向 path 中那个路径项的起点；未命中、target 本身
+ *                    是绝对路径时为 NULL；可以传 NULL
+ * @return malloc 出来的完整路径，由调用者 free；找不到返回 NULL
+ */
 char *confc_ex_find_path(const char *path,const char *target,char **start);
 
+/**
+ * @brief 解析转义序列，返回转义后的字符。
+ *
+ * str 指向引导反斜杠之后的文本。支持下面这些写法：
+ * \\a \\b \\f \\n \\r \\t \\v \\0 \\\\ \\' \\" \\?，
+ * 以及数字转义 \\xHH（1~2 位十六进制）和 \\NNN（1~3 位八进制）；
+ * 未知转义原样返回该字符。
+ *
+ * @param[in] str 指向反斜杠之后的文本（不含那个反斜杠）
+ * @return 转义后的字符；str 为 NULL 返回 0，str 为空（末尾孤立反斜杠）时
+ *         返回反斜杠本身
+ */
 char confc_parse_esc(const char *str);
+
+/**
+ * @brief 同 confc_parse_esc，并报告消费了几个字符。
+ *
+ * @param[in]  str 指向反斜杠之后的文本
+ * @param[out] n   从 str 消费的字符数（0~3）；可以传 NULL
+ * @return 转义后的字符
+ */
 char confc_ex_parse_esc(const char *str,size_t *n);
-/* \uXXXX / \UXXXXXXXX -> malloc 的 UTF-8 字符串，调用者 free；格式不对或码点非法返回 NULL */
+
+/**
+ * @brief 解析 \\uXXXX / \\UXXXXXXXX 形式的 Unicode 转义，输出 UTF-8。
+ *
+ * @param[in] str 指向反斜杠之后的文本，例如 "u4F60"
+ * @return malloc 出来的 UTF-8 字符串（1~4 字节 + 结尾 0），由调用者 free；
+ *         格式不对、落在代理区或超过 U+10FFFF 时返回 NULL
+ */
 char *confc_parse_esc_unicode(const char *str);
+
+/**
+ * @brief 同 confc_parse_esc_unicode，并报告消费了几个字符。
+ *
+ * @param[in]  str 指向反斜杠之后的文本
+ * @param[out] n   消费的字符数（\\uXXXX 为 5，\\UXXXXXXXX 为 9），失败时为 0；
+ *                 可以传 NULL
+ * @return malloc 出来的 UTF-8 字符串，由调用者 free；失败返回 NULL
+ */
 char *confc_ex_parse_esc_unicode(const char *str,size_t *n);
 
+/**
+ * @brief 解析以反斜杠开头的完整转义，返回还原出的字符串。
+ *
+ * @param[in] str 指向反斜杠的文本
+ * @return malloc 出来的字符串，由调用者 free；str 不以反斜杠开头或后面为空时
+ *         返回 NULL
+ */
 char *confc_parse_esc_all(const char *str);
+
+/**
+ * @brief 同 confc_parse_esc_all，并报告消费了几个字符。
+ *
+ * @param[in]  str 指向反斜杠的文本
+ * @param[out] n   消费的字符数（含开头那个反斜杠）；可以传 NULL
+ * @return malloc 出来的字符串，由调用者 free；失败返回 NULL
+ */
 char *confc_ex_parse_esc_all(const char *str,size_t *n);
 
+/**
+ * @brief 把字符串转成 long，按 C 规则（strict=0）。
+ *
+ * @param[in] str 输入字符串
+ * @return 解析出的整数；解析失败返回 0
+ */
 long confc_str_to_int(const char *str);
+
+/**
+ * @brief 把字符串转成 long。
+ *
+ * strict=0 按 C 规则：可选正负号、0x 十六进制、前导 0 八进制、十进制，末尾
+ * 可以跟 u/l/ul/ull 等后缀，数字里不允许下划线。
+ * strict=1 按 TOML 规则：0x/0o/0b/十进制，数字之间允许下划线，没有 C 后缀。
+ *
+ * @param[in]  str    输入字符串
+ * @param[out] n      消费的字符数；可以传 NULL
+ * @param[out] error  0 正常；1 解析完还有剩余字符；2 没能解析出完整值
+ *                    （溢出、下划线位置不合法也归到这一类）；可以传 NULL
+ * @param[in]  strict 非 0 表示启用 TOML 规则
+ * @return 解析出的整数（error 为 2 时返回已经解析到的部分）
+ */
 long confc_ex_str_to_int(const char *str,size_t *n,int *error,int strict);
 
+/**
+ * @brief 把字符串转成 double，按 C 规则（strict=0）。
+ *
+ * @param[in] str 输入字符串
+ * @return 解析出的浮点数；解析失败返回 0.0
+ */
 double confc_str_to_float(const char *str);
+
+/**
+ * @brief 把字符串转成 double。
+ *
+ * strict=0 按 C 规则：strtod 的写法（含 inf/nan、十六进制浮点），末尾可以跟
+ * f/F/l/L。strict=1 按 TOML 规则：允许 inf/nan，数字之间允许下划线，没有后缀、
+ * 没有十六进制浮点。
+ *
+ * @param[in]  str    输入字符串
+ * @param[out] n      消费的字符数；可以传 NULL
+ * @param[out] error  0 正常；1 解析完还有剩余字符；2 没能解析出完整值；可以传 NULL
+ * @param[in]  strict 非 0 表示启用 TOML 规则
+ * @return 解析出的浮点数（error 为 2 时返回已经解析到的部分）
+ */
 double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict);
 
+/**
+ * @brief 把字符串转成 Unix 时间戳（秒）。
+ *
+ * 支持 TOML 写法：YYYY-MM-DD、YYYY-MM-DD[Tt ]HH:MM:SS、可带小数秒，
+ * 以及可选的 Z/z 或 ±HH:MM 时区；没有时区时按 UTC 处理。
+ *
+ * @param[in] str 输入字符串
+ * @return Unix 时间戳（秒）；解析失败返回 0
+ */
 unsigned long confc_str_to_date(const char *str);
+
+/**
+ * @brief 把字符串转成时间戳，并给出相对 UTC 的偏移。
+ *
+ * @param[in]  str        输入字符串
+ * @param[out] time_zone  时区偏移（秒，东为正），Z 或没写时区时为 0；
+ *                        可以传 NULL
+ * @param[out] n          消费的字符数；可以传 NULL
+ * @param[out] error      0 正常；1 解析完还有剩余字符；2 没能解析出完整值
+ *                        （日期越界、字段非法也归到这一类）；可以传 NULL
+ * @return Unix 时间戳（秒）
+ */
 unsigned long confc_ex_str_to_date(const char *str,long *time_zone,size_t *n,int *error);
 
 
