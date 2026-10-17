@@ -12,8 +12,29 @@ typedef long ssize_t;
 
 
 /* 在以 ':' 分隔的 path 中查找可执行的 target，路径项支持 ~、~用户名、$VAR_NAME、${VAR}；
-   找到时返回 malloc 出来的完整路径（由调用者 free），否则返回 NULL */
+   confc_find_path：找到时返回 malloc 出来的完整路径（由调用者 free），否则返回 NULL
+   confc_ex_find_path：同上，另外把命中的那个路径项在 path 里的起始指针写到 *start
+                      （未命中、或 target 本身是绝对路径时写 NULL） */
 char *confc_find_path(const char *path,const char *target);
+char *confc_ex_find_path(const char *path,const char *target,char **start);
+
+char confc_parse_esc(const char *str);
+char confc_ex_parse_esc(const char *str,size_t *n);
+/* \uXXXX / \UXXXXXXXX -> malloc 的 UTF-8 字符串，调用者 free；格式不对或码点非法返回 NULL */
+char *confc_parse_esc_unicode(const char *str);
+char *confc_ex_parse_esc_unicode(const char *str,size_t *n);
+
+char *confc_parse_esc_all(const char *str);
+char *confc_ex_parse_esc_all(const char *str,size_t *n);
+
+long confc_str_to_int(const char *str);
+long confc_ex_str_to_int(const char *str,size_t *n,int *error,int strict);
+
+double confc_str_to_float(const char *str);
+double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict);
+
+unsigned long confc_str_to_date(const char *str);
+unsigned long confc_ex_str_to_date(const char *str,long *time_zone,size_t *n,int *error);
 
 
 
@@ -59,8 +80,9 @@ typedef enum {
     TOML_FLOAT,
     TOML_BOOLEAN,
     TOML_DATETIME,
+    TOML_ARRAY,
     TOML_TABLE,
-    TOML_ARRAY
+    TOML_ARRAY_OF_TABLES
 }toml_type_t;
 
 typedef struct {
@@ -96,15 +118,44 @@ typedef struct {
 
 typedef struct {
     toml_type_t tp;
+    toml_type_t **items;
+    size_t size;
+}toml_array_t;
+
+typedef struct {
+    toml_type_t tp;
+    const char *name;
     toml_pair_t *pairs;
     size_t size;
 }toml_table_t;
 
 typedef struct {
     toml_type_t tp;
-    toml_type_t *items;
+    const char *name;
+    struct toml_table_item_t{
+        toml_pair_t *pairs;
+        size_t size;
+    } *table;
     size_t size;
-}toml_array_t;
+}toml_array_of_tables_t;
+
+typedef struct {
+    size_t size;
+    toml_pair_t *pairs;
+}toml_t;
+
+
+toml_t toml_load(const char *filename);
+toml_t toml_load_from_memory(const char *file);
+void toml_unload(toml_t *file);
+
+void toml_add_table(toml_t *file,toml_table_t *table);
+void toml_add_pair(toml_table_t *table,toml_pair_t *pair);
+
+toml_type_t *toml_lookup(toml_t *file,const char *table,size_t i,const char *key);
+toml_type_t *toml_lookup_table(toml_t *file,const char *name);
+toml_type_t *toml_lookup_from_table(toml_table_t *table,const char *key);
+toml_type_t *toml_lookup_from_array_of_tables(toml_array_of_tables_t *table,size_t i,const char *key);
 
 
 
@@ -117,12 +168,14 @@ typedef struct {
 #include <errno.h>
 #include <fcntl.h>
 #include <pwd.h>
+#include <limits.h>
+#include <math.h>
 #include <sys/stat.h>
 
 #ifdef CONFC_DEBUG_OUTPUT
-#define ini_log_err(...) fprintf(stderr,__VA_ARGS__)
+#define confc_log_err(...) fprintf(stderr,__VA_ARGS__)
 #else
-#define ini_log_err(...) ((void)0)
+#define confc_log_err(...) ((void)0)
 #endif
 
 #ifndef DARRAY_H
@@ -147,6 +200,13 @@ typedef darray_t(char) da_str;
 
 
 char *confc_find_path(const char *path,const char *target){
+    return confc_ex_find_path(path,target,NULL);
+}
+char *confc_ex_find_path(const char *path,const char *target,char **start){
+    if(start!=NULL){
+        *start=NULL;
+    }
+
     if(target==NULL||target[0]=='\0'){
         return NULL;
     }
@@ -160,7 +220,7 @@ char *confc_find_path(const char *path,const char *target){
         size_t size=strlen(target)+1;
         char *copy=malloc(size);
         if(!copy){
-            ini_log_err("confc_find_path: malloc %zu bytes failed: %s\n",size,strerror(errno));
+            confc_log_err("confc_ex_find_path: malloc %zu bytes failed: %s\n",size,strerror(errno));
             return NULL;
         }
         memcpy(copy,target,size);
@@ -322,6 +382,10 @@ char *confc_find_path(const char *path,const char *target){
             if(!failed){
                 struct stat status;
                 if(stat(candidate.arr,&status)==0&&S_ISREG(status.st_mode)&&access(candidate.arr,X_OK)==0){
+                    if(start!=NULL){
+                        /* 命中的路径项在 path 里的起点（path 是 const，这里按声明转掉 const） */
+                        *start=(char *)entry;
+                    }
                     ret=candidate.arr;
                     candidate.arr=NULL;
                     candidate.size=0;
@@ -343,6 +407,637 @@ char *confc_find_path(const char *path,const char *target){
     return ret;
 }
 
+/* 解析 '\' 后面的转义序列
+   confc_ex_parse_esc:         返回转义后的单个字符；*n 返回从 str 消费了多少字符（0~3）
+   confc_parse_esc:            同 confc_ex_parse_esc，不要消费长度
+   confc_ex_parse_esc_unicode: 处理 \uXXXX / \UXXXXXXXX，返回 malloc 的 UTF-8 字符串
+                               （调用者 free），*n 返回消费的字符数（5 或 9）；
+                               格式不对或码点非法返回 NULL
+   confc_parse_esc_unicode:    同 confc_ex_parse_esc_unicode，不要消费长度 */
+char confc_parse_esc(const char *str){
+    return confc_ex_parse_esc(str,NULL);
+} 
+char confc_ex_parse_esc(const char *str,size_t *n){
+    if(n!=NULL){
+        *n=0;
+    }
+    if(str==NULL){
+        return '\0';
+    }
+    if(str[0]=='\0'){
+        return '\\';
+    }
+
+    /* \xHH：'x' + 1~2 位十六进制 */
+    if(str[0]=='x'){
+        unsigned value=0;
+        size_t count=0;
+        for(size_t i=1;i<=2&&str[i]!='\0';i++){
+            char c=str[i];
+            unsigned d;
+            if(c>='0'&&c<='9'){
+                d=(unsigned)(c-'0');
+            }else if(c>='a'&&c<='f'){
+                d=(unsigned)(c-'a'+10);
+            }else if(c>='A'&&c<='F'){
+                d=(unsigned)(c-'A'+10);
+            }else{
+                break;
+            }
+            value=value*16+d;
+            count++;
+        }
+        if(count==0){
+            if(n!=NULL){
+                *n=1;
+            }
+            return 'x';
+        }
+        if(n!=NULL){
+            *n=1+count;
+        }
+        return (char)value;
+    }
+
+    /* \NNN：1~3 位八进制 */
+    if(str[0]>='0'&&str[0]<='7'){
+        unsigned value=0;
+        size_t count=0;
+        for(size_t i=0;i<3&&str[i]>='0'&&str[i]<='7';i++){
+            value=value*8+(unsigned)(str[i]-'0');
+            count++;
+        }
+        if(n!=NULL){
+            *n=count;
+        }
+        return (char)value;
+    }
+
+    if(n!=NULL){
+        *n=1;
+    }
+    switch(str[0]){
+        case 'a': return '\a';
+        case 'b': return '\b';
+        case 'f': return '\f';
+        case 'n': return '\n';
+        case 'r': return '\r';
+        case 't': return '\t';
+        case 'v': return '\v';
+        case '\\': return '\\';
+        case '\'': return '\'';
+        case '"': return '"';
+        case '?': return '?';
+        default: return str[0];
+    }
+}
+
+char *confc_parse_esc_unicode(const char *str){
+    return confc_ex_parse_esc_unicode(str,NULL);
+}
+char *confc_ex_parse_esc_unicode(const char *str,size_t *n){
+    if(n!=NULL){
+        *n=0;
+    }
+    if(str==NULL){
+        return NULL;
+    }
+
+    size_t digits;
+    if(str[0]=='u'){
+        digits=4;
+    }else if(str[0]=='U'){
+        digits=8;
+    }else{
+        return NULL;
+    }
+
+    unsigned long code=0;
+    for(size_t i=1;i<=digits;i++){
+        char c=str[i];
+        unsigned d;
+        if(c>='0'&&c<='9'){
+            d=(unsigned)(c-'0');
+        }else if(c>='a'&&c<='f'){
+            d=(unsigned)(c-'a'+10);
+        }else if(c>='A'&&c<='F'){
+            d=(unsigned)(c-'A'+10);
+        }else{
+            return NULL;
+        }
+        code=code*16+d;
+    }
+
+    if(code>0x10FFFF||(code>=0xD800&&code<=0xDFFF)){
+        confc_log_err("confc_ex_parse_esc_unicode: invalid code point 0x%lX\n",code);
+        return NULL;
+    }
+
+    char *ret=malloc(5);
+    if(!ret){
+        confc_log_err("confc_ex_parse_esc_unicode: malloc 5 bytes failed: %s\n",strerror(errno));
+        return NULL;
+    }
+
+    size_t size=0;
+    if(code<0x80){
+        ret[size++]=(char)code;
+    }else if(code<0x800){
+        ret[size++]=(char)(0xC0|(code>>6));
+        ret[size++]=(char)(0x80|(code&0x3F));
+    }else if(code<0x10000){
+        ret[size++]=(char)(0xE0|(code>>12));
+        ret[size++]=(char)(0x80|((code>>6)&0x3F));
+        ret[size++]=(char)(0x80|(code&0x3F));
+    }else{
+        ret[size++]=(char)(0xF0|(code>>18));
+        ret[size++]=(char)(0x80|((code>>12)&0x3F));
+        ret[size++]=(char)(0x80|((code>>6)&0x3F));
+        ret[size++]=(char)(0x80|(code&0x3F));
+    }
+    ret[size]='\0';
+
+    if(n!=NULL){
+        *n=1+digits;
+    }
+    return ret;
+}
+
+char *confc_parse_esc_all(const char *str){
+    return confc_ex_parse_esc_all(str,NULL);
+}
+char *confc_ex_parse_esc_all(const char *str,size_t *n){
+    if(str[0]!='\\'||str[1]=='\0'){
+        return NULL;
+    }
+
+    if(str[1]=='u'||str[1]=='U'){
+        char *r=confc_ex_parse_esc_unicode(&str[1],n);
+        (*n)++;
+        return r;
+    }
+
+    char *r=malloc(2);
+    r[0]=confc_ex_parse_esc(&str[1],n);
+    r[1]='\0';
+    (*n)++;
+    return r;
+}
+
+/* 字符串 -> 整数
+   strict=0：遵守 C 规则（0x 十六进制、前导 0 八进制、十进制，末尾可跟 u/l/ul/ull 等后缀）
+   strict=1：遵守 TOML 规则（0x/0o/0b/十进制，数字之间允许 '_'，没有 C 后缀）
+   *n 返回消费的字符数，*error：0 正常，1 解析完还有剩余字符，2 没能解析出完整值 */
+long confc_str_to_int(const char *str){
+    return confc_ex_str_to_int(str,NULL,NULL,0);
+}
+long confc_ex_str_to_int(const char *str,size_t *n,int *error,int strict){
+    if(n!=NULL){
+        *n=0;
+    }
+    if(error!=NULL){
+        *error=2;
+    }
+    if(str==NULL){
+        return 0;
+    }
+
+    long value=0;
+    size_t used=0;
+    int complete=0;
+
+    if(!strict){
+        errno=0;
+        char *end=NULL;
+        value=strtol(str,&end,0);
+        if(end!=str){
+            used=(size_t)(end-str);
+            complete=1;
+
+            /* 只认 u、l、ll、ul、lu、ull、llu 这些后缀（大小写均可） */
+            size_t i=used;
+            while(i-used<3&&(str[i]=='u'||str[i]=='U'||str[i]=='l'||str[i]=='L')){
+                i++;
+            }
+            if(i>used){
+                char up[4];
+                size_t len=i-used;
+                for(size_t k=0;k<len;k++){
+                    char c=str[used+k];
+                    up[k]=(char)((c>='a'&&c<='z')?(c-'a'+'A'):c);
+                }
+                up[len]='\0';
+                if(strcmp(up,"U")==0||strcmp(up,"L")==0||strcmp(up,"LL")==0||
+                   strcmp(up,"UL")==0||strcmp(up,"LU")==0||
+                   strcmp(up,"ULL")==0||strcmp(up,"LLU")==0){
+                    used=i;
+                }
+            }
+            if(errno==ERANGE){
+                complete=0;
+            }
+        }
+    }else{
+        const char *p=str;
+        int neg=0;
+        if(*p=='+'||*p=='-'){
+            neg=(*p=='-');
+            p++;
+        }
+
+        int base=10;
+        if(p[0]=='0'&&(p[1]=='x'||p[1]=='X')){
+            base=16;
+            p+=2;
+        }else if(p[0]=='0'&&(p[1]=='o'||p[1]=='O')){
+            base=8;
+            p+=2;
+        }else if(p[0]=='0'&&(p[1]=='b'||p[1]=='B')){
+            base=2;
+            p+=2;
+        }
+
+        unsigned long acc=0;
+        size_t digits=0;
+        int overflow=0;
+        int underscore=0;
+
+        while(*p!='\0'){
+            char c=*p;
+            if(c=='_'){
+                /* '_' 只能夹在数字之间 */
+                if(digits==0||underscore){
+                    break;
+                }
+                underscore=1;
+                p++;
+                continue;
+            }
+            int d=-1;
+            if(c>='0'&&c<='9'){
+                d=c-'0';
+            }else if(c>='a'&&c<='f'){
+                d=c-'a'+10;
+            }else if(c>='A'&&c<='F'){
+                d=c-'A'+10;
+            }
+            if(d<0||d>=base){
+                break;
+            }
+            underscore=0;
+            if(acc>(~0UL-(unsigned long)d)/(unsigned long)base){
+                overflow=1;
+            }
+            acc=acc*(unsigned long)base+(unsigned long)d;
+            digits++;
+            p++;
+        }
+
+        if(digits>0&&!underscore){
+            used=(size_t)(p-str);
+            complete=1;
+            if(neg){
+                if(overflow||acc>((unsigned long)LONG_MAX)+1UL){
+                    complete=0;
+                    value=LONG_MIN;
+                }else{
+                    value=(long)(0-acc);
+                }
+            }else{
+                if(overflow||acc>(unsigned long)LONG_MAX){
+                    complete=0;
+                    value=LONG_MAX;
+                }else{
+                    value=(long)acc;
+                }
+            }
+        }
+    }
+
+    if(n!=NULL){
+        *n=used;
+    }
+    if(error!=NULL){
+        *error=complete?((str[used]!='\0')?1:0):2;
+    }
+    return value;
+}
+
+/* 字符串 -> 浮点数
+   strict=0：遵守 C 规则（strtod，末尾可跟 f/F/l/L）
+   strict=1：遵守 TOML 规则（允许 inf/nan，数字之间允许 '_'，没有后缀、没有十六进制浮点）
+   *n 返回消费的字符数，*error 同 confc_ex_str_to_int */
+double confc_str_to_float(const char *str){
+    return confc_ex_str_to_float(str,NULL,NULL,0);
+}
+double confc_ex_str_to_float(const char *str,size_t *n,int *error,int strict){
+    if(n!=NULL){
+        *n=0;
+    }
+    if(error!=NULL){
+        *error=2;
+    }
+    if(str==NULL){
+        return 0.0;
+    }
+
+    double value=0.0;
+    size_t used=0;
+    int complete=0;
+
+    if(!strict){
+        errno=0;
+        char *end=NULL;
+        value=strtod(str,&end);
+        if(end!=str){
+            used=(size_t)(end-str);
+            complete=1;
+            if(str[used]=='f'||str[used]=='F'||str[used]=='l'||str[used]=='L'){
+                used++;
+            }
+            if(errno==ERANGE){
+                complete=0;
+            }
+        }
+    }else{
+        const char *p=str;
+        int neg=0;
+        if(*p=='+'||*p=='-'){
+            neg=(*p=='-');
+            p++;
+        }
+
+        if(strncmp(p,"inf",3)==0){
+            value=INFINITY;
+            p+=3;
+            complete=1;
+        }else if(strncmp(p,"nan",3)==0){
+            value=NAN;
+            p+=3;
+            complete=1;
+        }else{
+            int bad=0;
+
+            /* 整数部分 */
+            size_t digits=0;
+            int underscore=0;
+            while(*p!='\0'){
+                char c=*p;
+                if(c=='_'){
+                    if(digits==0||underscore){
+                        bad=1;
+                        break;
+                    }
+                    underscore=1;
+                    p++;
+                    continue;
+                }
+                if(c>='0'&&c<='9'){
+                    underscore=0;
+                    value=value*10.0+(double)(c-'0');
+                    digits++;
+                    p++;
+                    continue;
+                }
+                break;
+            }
+            if(digits==0||underscore){
+                bad=1;
+            }
+
+            /* 小数部分 */
+            if(!bad&&*p=='.'){
+                p++;
+                double scale=1.0;
+                size_t fdigits=0;
+                underscore=0;
+                while(*p!='\0'){
+                    char c=*p;
+                    if(c=='_'){
+                        if(fdigits==0||underscore){
+                            bad=1;
+                            break;
+                        }
+                        underscore=1;
+                        p++;
+                        continue;
+                    }
+                    if(c>='0'&&c<='9'){
+                        underscore=0;
+                        scale*=10.0;
+                        value+=(double)(c-'0')/scale;
+                        fdigits++;
+                        p++;
+                        continue;
+                    }
+                    break;
+                }
+                if(fdigits==0||underscore){
+                    bad=1;
+                }
+            }
+
+            /* 指数部分；不完整时把 'e' 留作尾随字符 */
+            if(!bad&&(*p=='e'||*p=='E')){
+                const char *ep=p;
+                p++;
+                int exp_neg=0;
+                if(*p=='+'||*p=='-'){
+                    exp_neg=(*p=='-');
+                    p++;
+                }
+                long exp=0;
+                size_t edigits=0;
+                int ebad=0;
+                underscore=0;
+                while(*p!='\0'){
+                    char c=*p;
+                    if(c=='_'){
+                        if(edigits==0||underscore){
+                            ebad=1;
+                            break;
+                        }
+                        underscore=1;
+                        p++;
+                        continue;
+                    }
+                    if(c>='0'&&c<='9'){
+                        underscore=0;
+                        if(exp<100000){
+                            exp=exp*10+(c-'0');
+                        }
+                        edigits++;
+                        p++;
+                        continue;
+                    }
+                    break;
+                }
+                if(ebad||underscore||edigits==0){
+                    p=ep;
+                }else{
+                    if(exp>1000){
+                        exp=1000;
+                    }
+                    while(exp>0){
+                        if(exp_neg){
+                            value/=10.0;
+                        }else{
+                            value*=10.0;
+                        }
+                        exp--;
+                    }
+                }
+            }
+
+            if(!bad){
+                complete=1;
+            }
+        }
+
+        if(complete){
+            if(neg){
+                value=-value;
+            }
+            used=(size_t)(p-str);
+        }
+    }
+
+    if(n!=NULL){
+        *n=used;
+    }
+    if(error!=NULL){
+        *error=complete?((str[used]!='\0')?1:0):2;
+    }
+    return value;
+}
+
+/* 字符串 -> 时间戳（Unix 秒）
+   支持 TOML 写法：YYYY-MM-DD、YYYY-MM-DD[ Tt]HH:MM:SS、可带 .小数秒，
+   以及可选的 Z 或 ±HH:MM 时区；没有时区按 UTC 处理。
+   *time_zone 返回相对 UTC 的偏移（秒，东为正）；*n、*error 同前 */
+unsigned long confc_str_to_date(const char *str){
+    return confc_ex_str_to_date(str,NULL,NULL,NULL);
+}
+unsigned long confc_ex_str_to_date(const char *str,long *time_zone,size_t *n,int *error){
+    if(n!=NULL){
+        *n=0;
+    }
+    if(error!=NULL){
+        *error=2;
+    }
+    if(time_zone!=NULL){
+        *time_zone=0;
+    }
+    if(str==NULL){
+        return 0;
+    }
+
+    const char *p=str;
+    long year=0,month=0,day=0,hour=0,minute=0,second=0;
+    long tz=0;
+    size_t used=0;
+
+    do{
+        /* YYYY-MM-DD */
+        if(p[0]<'0'||p[0]>'9'){ break; }
+        if(p[1]<'0'||p[1]>'9'){ break; }
+        if(p[2]<'0'||p[2]>'9'){ break; }
+        if(p[3]<'0'||p[3]>'9'){ break; }
+        year=(p[0]-'0')*1000+(p[1]-'0')*100+(p[2]-'0')*10+(p[3]-'0');
+        if(p[4]!='-'){ break; }
+        p+=5;
+
+        if(p[0]<'0'||p[0]>'9'||p[1]<'0'||p[1]>'9'){ break; }
+        month=(p[0]-'0')*10+(p[1]-'0');
+        if(p[2]!='-'){ break; }
+        p+=3;
+
+        if(p[0]<'0'||p[0]>'9'||p[1]<'0'||p[1]>'9'){ break; }
+        day=(p[0]-'0')*10+(p[1]-'0');
+        p+=2;
+
+        /* 可选的时间部分 */
+        if(*p=='T'||*p=='t'||*p==' '){
+            p++;
+
+            if(p[0]<'0'||p[0]>'9'||p[1]<'0'||p[1]>'9'){ break; }
+            hour=(p[0]-'0')*10+(p[1]-'0');
+            if(p[2]!=':'){ break; }
+            p+=3;
+
+            if(p[0]<'0'||p[0]>'9'||p[1]<'0'||p[1]>'9'){ break; }
+            minute=(p[0]-'0')*10+(p[1]-'0');
+            if(p[2]!=':'){ break; }
+            p+=3;
+
+            if(p[0]<'0'||p[0]>'9'||p[1]<'0'||p[1]>'9'){ break; }
+            second=(p[0]-'0')*10+(p[1]-'0');
+            p+=2;
+
+            /* 小数秒：只消费，不参与时间戳 */
+            if(*p=='.'){
+                p++;
+                size_t fdigits=0;
+                while(*p>='0'&&*p<='9'){
+                    p++;
+                    fdigits++;
+                }
+                if(fdigits==0){ break; }
+            }
+
+            /* 时区 */
+            if(*p=='Z'||*p=='z'){
+                p++;
+                tz=0;
+            }else if(*p=='+'||*p=='-'){
+                long sign=(*p=='-')?-1:1;
+                p++;
+                if(p[0]<'0'||p[0]>'9'||p[1]<'0'||p[1]>'9'){ break; }
+                long oh=(p[0]-'0')*10+(p[1]-'0');
+                if(p[2]!=':'){ break; }
+                if(p[3]<'0'||p[3]>'9'||p[4]<'0'||p[4]>'9'){ break; }
+                long om=(p[3]-'0')*10+(p[4]-'0');
+                if(oh>23||om>59){ break; }
+                tz=sign*(oh*3600+om*60);
+                p+=5;
+            }
+        }
+
+        /* 范围检查 */
+        if(month<1||month>12){ break; }
+        static const int mdays[12]={31,28,31,30,31,30,31,31,30,31,30,31};
+        int leap=((year%4==0&&year%100!=0)||year%400==0);
+        int dim=mdays[month-1]+((month==2&&leap)?1:0);
+        if(day<1||day>dim){ break; }
+        if(hour>23||minute>59||second>60){ break; }
+
+        /* 公历 -> 1970-01-01 起的天数 */
+        long y=year-((month<=2)?1:0);
+        long era=(y>=0?y:y-399)/400;
+        long yoe=y-era*400;
+        long doy=(153*(month+((month>2)?-3:9))+2)/5+day-1;
+        long doe=yoe*365+yoe/4-yoe/100+doy;
+        long days=era*146097+doe-719468;
+
+        long long stamp=(long long)days*86400LL+hour*3600LL+minute*60LL+second-tz;
+
+        used=(size_t)(p-str);
+        (void)0;
+        if(time_zone!=NULL){
+            *time_zone=tz;
+        }
+        if(n!=NULL){
+            *n=used;
+        }
+        if(error!=NULL){
+            *error=(*p!='\0')?1:0;
+        }
+        return (unsigned long)stamp;
+    }while(0);
+
+    return 0;
+}
+
 
 
 ini_t ini_load(const char *filename){
@@ -359,7 +1054,7 @@ ini_t ini_load(const char *filename){
     }
     char *mem=malloc(status.st_size+1);
     if(!mem){
-        ini_log_err("ini_load: malloc %zu bytes failed: %s\n",(size_t)(status.st_size+1),strerror(errno));
+        confc_log_err("ini_load: malloc %zu bytes failed: %s\n",(size_t)(status.st_size+1),strerror(errno));
         close(fd);
         return ret;
     }
@@ -384,10 +1079,7 @@ ini_t ini_load(const char *filename){
     return ret;
 }
 
-inline static void ini_init_section(ini_t *file,ini_section_t **now_section){
-    ini_section_t section={.name=""};
-    *now_section=ini_add_section(file,&section);
-}
+
 static void ini_parse_per_line(ini_t *ret,ini_section_t **now_section,const char *file,size_t *i){
 #define i (*i)
 
@@ -467,11 +1159,12 @@ static void ini_parse_per_line(ini_t *ret,ini_section_t **now_section,const char
 
     ini_pair_t pair={.key=key.arr,.value=value.arr};
     if(*now_section==NULL){
-        ini_init_section(ret,now_section);
+        char *name=malloc(1);
+        *name='\0';
+        ini_section_t section={.name=name};
+        *now_section=ini_add_section(ret,&section);
     }
-    if(*now_section!=NULL){
-        ini_add_pair(*now_section,&pair);
-    }
+    ini_add_pair(*now_section,&pair);
     da_clear(&key);
     da_clear(&value);
 
@@ -514,7 +1207,7 @@ void ini_unload(ini_t *file){
 
 char *ini_write_to_memory(ini_t *file){
     if(file==NULL){
-        ini_log_err("ini_write_to_memory: file is nullptr\n");
+        confc_log_err("ini_write_to_memory: file is nullptr\n");
         return NULL;
     }
 
@@ -553,7 +1246,7 @@ char *ini_write_to_memory(ini_t *file){
     failed|=da_add(sizeof(char),&mem,"");
 
     if(failed){
-        ini_log_err("ini_write_to_memory: out of memory\n");
+        confc_log_err("ini_write_to_memory: out of memory\n");
         da_clear(&mem);
         return NULL;
     }
@@ -562,7 +1255,7 @@ char *ini_write_to_memory(ini_t *file){
 
 void ini_write(FILE *fp,ini_t *file){
     if(fp==NULL||file==NULL){
-        ini_log_err("ini_write: nullptr argument\n");
+        confc_log_err("ini_write: nullptr argument\n");
         return;
     }
 
@@ -590,7 +1283,7 @@ void ini_write(FILE *fp,ini_t *file){
 
 void ini_write_fd(int fd,ini_t *file){
     if(file==NULL){
-        ini_log_err("ini_write_fd: file is nullptr\n");
+        confc_log_err("ini_write_fd: file is nullptr\n");
         return;
     }
 
@@ -647,7 +1340,7 @@ ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
     const char *src_name=section->name?section->name:"";
     char *name=malloc(strlen(src_name)+1);
     if(!name){
-        ini_log_err("ini_add_section: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_name)+1),strerror(errno));
+        confc_log_err("ini_add_section: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_name)+1),strerror(errno));
         return NULL;
     }
     strcpy(name,src_name);
@@ -657,7 +1350,7 @@ ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
     if(file->section_size==0){
         file->sections=malloc(sizeof(ini_section_t));
         if(!file->sections){
-            ini_log_err("ini_add_section: malloc %zu bytes failed: %s\n",sizeof(ini_section_t),strerror(errno));
+            confc_log_err("ini_add_section: malloc %zu bytes failed: %s\n",sizeof(ini_section_t),strerror(errno));
             free(name);
             return NULL;
         }
@@ -685,7 +1378,7 @@ ini_section_t *ini_add_section(ini_t *file,ini_section_t *section){
     }
     ini_section_t *sections=realloc(file->sections,(file->section_size+1)*sizeof(ini_section_t));
     if(!sections){
-        ini_log_err("ini_add_section: realloc %zu bytes failed: %s\n",(size_t)((file->section_size+1)*sizeof(ini_section_t)),strerror(errno));
+        confc_log_err("ini_add_section: realloc %zu bytes failed: %s\n",(size_t)((file->section_size+1)*sizeof(ini_section_t)),strerror(errno));
         free(name);
         return NULL;
     }
@@ -704,13 +1397,13 @@ void ini_add_pair(ini_section_t *section,ini_pair_t *pair){
     ini_pair_t p=*pair;
     p.key=malloc(strlen(src_key)+1);
     if(!p.key){
-        ini_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_key)+1),strerror(errno));
+        confc_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_key)+1),strerror(errno));
         return ;
     }
     strcpy(p.key,src_key);
     p.value=malloc(strlen(src_value)+1);
     if(!p.value){
-        ini_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_value)+1),strerror(errno));
+        confc_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_value)+1),strerror(errno));
         free(p.key);
         return ;
     }
@@ -719,7 +1412,7 @@ void ini_add_pair(ini_section_t *section,ini_pair_t *pair){
     if(section->pair_size==0){
         section->pairs=malloc(sizeof(ini_pair_t));
         if(!section->pairs){
-            ini_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",sizeof(ini_pair_t),strerror(errno));
+            confc_log_err("ini_add_pair: malloc %zu bytes failed: %s\n",sizeof(ini_pair_t),strerror(errno));
             free(p.key);
             free(p.value);
             return ;
@@ -747,7 +1440,7 @@ void ini_add_pair(ini_section_t *section,ini_pair_t *pair){
     }
     ini_pair_t *pairs=realloc(section->pairs,(section->pair_size+1)*sizeof(ini_pair_t));
     if(!pairs){
-        ini_log_err("ini_add_pair: realloc %zu bytes failed: %s\n",(size_t)((section->pair_size+1)*sizeof(ini_pair_t)),strerror(errno));
+        confc_log_err("ini_add_pair: realloc %zu bytes failed: %s\n",(size_t)((section->pair_size+1)*sizeof(ini_pair_t)),strerror(errno));
         free(p.key);
         free(p.value);
         return ;
@@ -792,7 +1485,7 @@ int ini_del_section(ini_t *file,const char *section){
     file->section_size--;
     ini_section_t *sections=realloc(file->sections,file->section_size*sizeof(ini_section_t));
     if(!sections&&file->section_size){
-        ini_log_err("ini_del_section: realloc %zu bytes failed: %s\n",(size_t)(file->section_size*sizeof(ini_section_t)),strerror(errno));
+        confc_log_err("ini_del_section: realloc %zu bytes failed: %s\n",(size_t)(file->section_size*sizeof(ini_section_t)),strerror(errno));
     }else{
         file->sections=sections;
     }
@@ -837,7 +1530,7 @@ int ini_del_pair_from_section(ini_section_t *section,const char *key){
     section->pair_size--;
     ini_pair_t *pairs=realloc(section->pairs,section->pair_size*sizeof(ini_pair_t));
     if(!pairs&&section->pair_size){
-        ini_log_err("ini_del_pair_from_section: realloc %zu bytes failed: %s\n",(size_t)(section->pair_size*sizeof(ini_pair_t)),strerror(errno));
+        confc_log_err("ini_del_pair_from_section: realloc %zu bytes failed: %s\n",(size_t)(section->pair_size*sizeof(ini_pair_t)),strerror(errno));
     }else{
         section->pairs=pairs;
     }
@@ -894,6 +1587,615 @@ const char *ini_lookup_from_section(ini_section_t *section,const char *key){
     return NULL;
 }
 
+
+
+
+toml_t toml_load(const char *filename){
+    toml_t ret={};
+    int fd=open(filename,O_RDONLY);
+    if(fd==-1){
+        return ret;
+    }
+
+    struct stat status;
+    if(fstat(fd,&status)!=0){
+        close(fd);
+        return ret;
+    }
+    char *mem=malloc(status.st_size+1);
+    if(!mem){
+        confc_log_err("toml_load: malloc %zu bytes failed: %s\n",(size_t)(status.st_size+1),strerror(errno));
+        close(fd);
+        return ret;
+    }
+    ssize_t got=0;
+    while(got<(ssize_t)status.st_size){
+        ssize_t n=read(fd,mem+got,status.st_size-got);
+        if(n<=0){
+            if(n==-1&&errno==EINTR){
+                continue;
+            }
+            break;
+        }
+        got+=n;
+    }
+    close(fd);
+
+    mem[got]='\0';
+    memset(mem+got+1,0,status.st_size-got);
+    ret=toml_load_from_memory(mem);
+
+    free(mem);
+    return ret;
+}
+
+static void toml_parse_per_pair(toml_t *ret,toml_table_t **now_table,const char *file,size_t *i){
+#define i (*i)
+
+    da_str key;
+    da_init(&key);
+
+    /* 跳过空白 */
+    while(file[i]==' '||file[i]=='\t'||file[i]=='\r'||file[i]=='\n'){
+        i++;
+    }
+
+    /* 空行 / 注释 */
+    if(file[i]=='#'||file[i]=='\0'){
+        while(file[i]!='\0'&&file[i]!='\n'){
+            i++;
+        }
+        da_clear(&key);
+        return ;
+    }
+
+    /* 表头：[name] 或 [[name]] */
+    if(file[i]=='['){
+        int aot=(file[i+1]=='[');
+        i+=aot?2:1;
+
+        while(file[i]==' '||file[i]=='\t'){
+            i++;
+        }
+
+        while(file[i]!='\0'&&file[i]!='\r'&&file[i]!='\n'&&file[i]!=']'){
+            da_add(sizeof(char),&key,&file[i]);
+            i++;
+        }
+        da_add(sizeof(char),&key,"");
+
+        while(key.size>1&&(key.arr[key.size-2]==' '||key.arr[key.size-2]=='\t')){
+            key.size--;
+            key.arr[key.size-1]='\0';
+        }
+
+        if(file[i]==']'){
+            i++;
+            if(aot&&file[i]==']'){
+                i++;
+            }
+        }
+        while(file[i]!='\0'&&file[i]!='\n'&&file[i]!='\r'){
+            i++;
+        }
+
+        /* 同名表复用；[[name]] 暂时也按 [name] 处理（array of tables 还没做逐元素累积） */
+        toml_type_t *found=toml_lookup_table(ret,key.arr);
+        if(found!=NULL&&*found==TOML_TABLE){
+            *now_table=(toml_table_t *)found;
+        }else{
+            toml_table_t *table=malloc(sizeof(toml_table_t));
+            if(table==NULL){
+                confc_log_err("toml_parse_per_pair: malloc %zu bytes failed: %s\n",sizeof(toml_table_t),strerror(errno));
+                da_clear(&key);
+                return ;
+            }
+            *table=(toml_table_t){.tp=TOML_TABLE,.name=key.arr,.pairs=NULL,.size=0};
+            toml_add_table(ret,table);
+            /* name 指向根 pairs 里那份拷贝，key.arr 就可以释放了 */
+            for(size_t k=0;k<ret->size;k++){
+                if(strcmp(ret->pairs[k].key,key.arr)==0){
+                    table->name=ret->pairs[k].key;
+                    break;
+                }
+            }
+            *now_table=table;
+        }
+        da_clear(&key);
+        return ;
+    }
+
+    /* 键：可以带引号，也可以裸写 */
+    if(file[i]=='\"'||file[i]=='\''){
+        char q=file[i];
+        int literal=(q=='\'');
+        i++;
+        while(file[i]!='\0'&&file[i]!=q){
+            if(!literal&&file[i]=='\\'){
+                size_t n=0;
+                char *r=confc_ex_parse_esc_all(&file[i],&n);
+                if(r==NULL){
+                    i++;
+                    continue;
+                }
+                for(size_t k=0;r[k]!='\0';k++){
+                    da_add(sizeof(char),&key,&r[k]);
+                }
+                free(r);
+                i+=n;
+                continue;
+            }
+            da_add(sizeof(char),&key,&file[i]);
+            i++;
+        }
+        if(file[i]==q){
+            i++;
+        }
+    }else{
+        while(file[i]!='\0'&&file[i]!=' '&&file[i]!='\t'&&file[i]!='\r'&&file[i]!='\n'&&file[i]!='='&&file[i]!='#'){
+            da_add(sizeof(char),&key,&file[i]);
+            i++;
+        }
+    }
+    da_add(sizeof(char),&key,"");
+
+    while(file[i]==' '||file[i]=='\t'){
+        i++;
+    }
+
+    if(file[i]!='='){
+        /* 不是 key = value，丢掉这一行 */
+        while(file[i]!='\0'&&file[i]!='\n'){
+            i++;
+        }
+        da_clear(&key);
+        return ;
+    }
+    i++;
+
+    while(file[i]==' '||file[i]=='\t'){
+        i++;
+    }
+
+    /* 值：目前只处理字符串（基本/字面量/多行四种写法） */
+    toml_type_t *v=NULL;
+    da_str value;
+    da_init(&value);
+
+    if(file[i]=='\"'||file[i]=='\''){
+        char q=file[i];
+        int literal=(q=='\'');
+        int multiline=0;
+
+        if(file[i]==q&&file[i+1]==q&&file[i+2]==q&&file[i]!='\0'){
+            multiline=1;
+            i+=3;
+            /* 开头的换行不算内容 */
+            if(file[i]=='\r'){
+                i++;
+            }
+            if(file[i]=='\n'){
+                i++;
+            }
+        }else{
+            i++;
+        }
+
+        while(file[i]!='\0'){
+            if(multiline){
+                if(file[i]==q&&file[i+1]==q&&file[i+2]==q){
+                    i+=3;
+                    break;
+                }
+            }else if(file[i]==q){
+                i++;
+                break;
+            }
+
+            if(!literal&&file[i]=='\\'){
+                size_t n=0;
+                char *r=confc_ex_parse_esc_all(&file[i],&n);
+                if(r==NULL){
+                    i++;
+                    continue;
+                }
+                for(size_t k=0;r[k]!='\0';k++){
+                    da_add(sizeof(char),&value,&r[k]);
+                }
+                free(r);
+                i+=n;
+                continue;
+            }
+
+            /* 单行字符串里不允许裸换行 */
+            if(!multiline&&(file[i]=='\n'||file[i]=='\r')){
+                break;
+            }
+
+            da_add(sizeof(char),&value,&file[i]);
+            i++;
+        }
+
+        da_add(sizeof(char),&value,"");
+        if(value.arr==NULL){
+            confc_log_err("toml_parse_per_pair: out of memory\n");
+            da_clear(&value);
+            da_clear(&key);
+            return ;
+        }
+
+        toml_string_t *str=malloc(sizeof(toml_string_t));
+        if(str==NULL){
+            confc_log_err("toml_parse_per_pair: malloc %zu bytes failed: %s\n",sizeof(toml_string_t),strerror(errno));
+            da_clear(&value);
+            da_clear(&key);
+            return ;
+        }
+        str->tp=TOML_STRING;
+        str->str=value.arr;
+        v=(toml_type_t *)str;
+
+        /* value.arr 已经移交给 str->str */
+        value.arr=NULL;
+        value.size=0;
+        value.real=0;
+    }
+
+    /* 这一行剩下的东西（注释等）跳过 */
+    while(file[i]!='\0'&&file[i]!='\n'){
+        i++;
+    }
+
+    if(v==NULL){
+        da_clear(&value);
+        da_clear(&key);
+        return ;
+    }
+
+    /* 根层的键放到一个名字为 "" 的表里 */
+    if(*now_table==NULL){
+        toml_type_t *found=toml_lookup_table(ret,"");
+        if(found!=NULL&&*found==TOML_TABLE){
+            *now_table=(toml_table_t *)found;
+        }else{
+            toml_table_t *table=malloc(sizeof(toml_table_t));
+            char *empty=malloc(1);
+            if(table==NULL||empty==NULL){
+                confc_log_err("toml_parse_per_pair: malloc failed: %s\n",strerror(errno));
+                free(table);
+                free(empty);
+                free(((toml_string_t *)v)->str);
+                free(v);
+                da_clear(&key);
+                return ;
+            }
+            empty[0]='\0';
+            *table=(toml_table_t){.tp=TOML_TABLE,.name=empty,.pairs=NULL,.size=0};
+            toml_add_table(ret,table);
+            for(size_t k=0;k<ret->size;k++){
+                if(strcmp(ret->pairs[k].key,"")==0){
+                    table->name=ret->pairs[k].key;
+                    break;
+                }
+            }
+            free(empty);
+            *now_table=table;
+        }
+    }
+
+    toml_pair_t pair={.key=key.arr,.value=v};
+    toml_add_pair(*now_table,&pair);
+
+    da_clear(&key);
+    da_clear(&value);
+
+#undef i
+}
+
+toml_t toml_load_from_memory(const char *file){
+    toml_t ret={};
+    if(file==NULL){
+        return ret;
+    }
+
+    toml_table_t *now_table=NULL;
+    size_t i=0;
+    while(file[i]!='\0'){
+        size_t before=i;
+        toml_parse_per_pair(&ret,&now_table,file,&i);
+        if(i==before){
+            i++;   /* 保证一定前进，避免死循环 */
+        }
+    }
+
+    return ret;
+}
+
+static void toml_free_value(toml_type_t *value){
+    if(value==NULL){
+        return ;
+    }
+
+    toml_type_t tp=*value;
+    if(tp==TOML_STRING){
+        free(((toml_string_t *)value)->str);
+    }else if(tp==TOML_ARRAY){
+        toml_array_t *arr=(toml_array_t *)value;
+        for(size_t i=0;i<arr->size;i++){
+            toml_free_value(arr->items[i]);
+        }
+        free(arr->items);
+    }else if(tp==TOML_TABLE){
+        toml_table_t *table=(toml_table_t *)value;
+        for(size_t i=0;i<table->size;i++){
+            free(table->pairs[i].key);
+            toml_free_value(table->pairs[i].value);
+        }
+        free(table->pairs);
+        /* name 指向根 pairs 的 key 或调用方自己的字符串，这里不单独释放 */
+    }else if(tp==TOML_ARRAY_OF_TABLES){
+        toml_array_of_tables_t *aot=(toml_array_of_tables_t *)value;
+        for(size_t i=0;i<aot->size;i++){
+            for(size_t j=0;j<aot->table[i].size;j++){
+                free(aot->table[i].pairs[j].key);
+                toml_free_value(aot->table[i].pairs[j].value);
+            }
+            free(aot->table[i].pairs);
+        }
+        free(aot->table);
+    }
+    free(value);
+}
+
+void toml_unload(toml_t *file){
+    if(file==NULL){
+        return ;
+    }
+
+    for(size_t i=0;i<file->size;i++){
+        free(file->pairs[i].key);
+        toml_free_value(file->pairs[i].value);
+    }
+    free(file->pairs);
+    file->pairs=NULL;
+    file->size=0;
+}
+
+void toml_add_table(toml_t *file,toml_table_t *table){
+    if(file==NULL||table==NULL){
+        confc_log_err("toml_add_table: nullptr argument\n");
+        return;
+    }
+
+    /* 表名来自表对象本身，按 table->tp 判断是 table 还是 array of tables */
+    const char *src_key=NULL;
+    if(table->tp==TOML_TABLE){
+        src_key=table->name;
+    }else if(table->tp==TOML_ARRAY_OF_TABLES){
+        src_key=((toml_array_of_tables_t *)table)->name;
+    }else{
+        confc_log_err("toml_add_table: not a table\n");
+        return;
+    }
+    if(src_key==NULL){
+        src_key="";
+    }
+
+    char *key=malloc(strlen(src_key)+1);
+    if(!key){
+        confc_log_err("toml_add_table: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_key)+1),strerror(errno));
+        return;
+    }
+    strcpy(key,src_key);
+
+    if(file->size==0){
+        file->pairs=malloc(sizeof(toml_pair_t));
+        if(!file->pairs){
+            confc_log_err("toml_add_table: malloc %zu bytes failed: %s\n",sizeof(toml_pair_t),strerror(errno));
+            free(key);
+            return;
+        }
+        file->pairs[0].key=key;
+        file->pairs[0].value=(toml_type_t *)table;
+        file->size++;
+        return;
+    }
+
+    size_t l=0,r=file->size-1;
+    size_t mid=l+(r-l)/2;
+    while(l<=r&&r!=(size_t)-1){
+        mid=l+(r-l)/2;
+        int res=strcmp(file->pairs[mid].key,key);
+        if(res==0){
+            if(table->tp==TOML_ARRAY_OF_TABLES){
+                /* 同名：已有 AOT 就把新对象里的元素并进数组；已有 table 就报错 */
+                if(file->pairs[mid].value!=NULL&&*file->pairs[mid].value==TOML_ARRAY_OF_TABLES){
+                    toml_array_of_tables_t *dst=(toml_array_of_tables_t *)file->pairs[mid].value;
+                    toml_array_of_tables_t *src=(toml_array_of_tables_t *)table;
+                    if(src->size>0){
+                        struct toml_table_item_t *items=realloc(dst->table,(dst->size+src->size)*sizeof(struct toml_table_item_t));
+                        if(items==NULL){
+                            confc_log_err("toml_add_table: realloc %zu bytes failed: %s\n",(size_t)((dst->size+src->size)*sizeof(struct toml_table_item_t)),strerror(errno));
+                            free(key);
+                            return;
+                        }
+                        dst->table=items;
+                        for(size_t k=0;k<src->size;k++){
+                            dst->table[dst->size+k]=src->table[k];
+                        }
+                        dst->size+=src->size;
+                    }
+                    /* 元素已经交给 dst，回收 src 的壳（pairs 不能动，已经被 dst 接管） */
+                    free(src->table);
+                    free(src);
+                }else{
+                    confc_log_err("toml_add_table: \"%s\" already exists as a table, cannot add array of tables\n",key);
+                }
+                free(key);
+                return;
+            }
+            confc_log_err("toml_add_table: duplicate key \"%s\", overwritten\n",key);
+            free(key);
+            file->pairs[mid].value=(toml_type_t *)table;
+            return;
+        }else if(res<0){
+            l=mid+1;
+        }else{
+            r=mid-1;
+        }
+    }
+
+    toml_pair_t *pairs=realloc(file->pairs,(file->size+1)*sizeof(toml_pair_t));
+    if(!pairs){
+        confc_log_err("toml_add_table: realloc %zu bytes failed: %s\n",(size_t)((file->size+1)*sizeof(toml_pair_t)),strerror(errno));
+        free(key);
+        return;
+    }
+    file->pairs=pairs;
+    memmove(&file->pairs[l+1],&file->pairs[l],(file->size-l)*sizeof(toml_pair_t));
+    file->pairs[l].key=key;
+    file->pairs[l].value=(toml_type_t *)table;
+    file->size++;
+}
+
+void toml_add_pair(toml_table_t *table,toml_pair_t *pair){
+    if(table==NULL||pair==NULL){
+        confc_log_err("toml_add_pair: nullptr argument\n");
+        return;
+    }
+
+    const char *src_key=pair->key?pair->key:"";
+    char *key=malloc(strlen(src_key)+1);
+    if(!key){
+        confc_log_err("toml_add_pair: malloc %zu bytes failed: %s\n",(size_t)(strlen(src_key)+1),strerror(errno));
+        return;
+    }
+    strcpy(key,src_key);
+
+    if(table->size==0){
+        table->pairs=malloc(sizeof(toml_pair_t));
+        if(!table->pairs){
+            confc_log_err("toml_add_pair: malloc %zu bytes failed: %s\n",sizeof(toml_pair_t),strerror(errno));
+            free(key);
+            return;
+        }
+        table->pairs[0].key=key;
+        table->pairs[0].value=pair->value;
+        table->size++;
+        return;
+    }
+
+    size_t l=0,r=table->size-1;
+    size_t mid=l+(r-l)/2;
+    while(l<=r&&r!=(size_t)-1){
+        mid=l+(r-l)/2;
+        int res=strcmp(table->pairs[mid].key,key);
+        if(res==0){
+            confc_log_err("toml_add_pair: duplicate key \"%s\", overwritten\n",key);
+            free(key);
+            table->pairs[mid].value=pair->value;
+            return;
+        }else if(res<0){
+            l=mid+1;
+        }else{
+            r=mid-1;
+        }
+    }
+
+    toml_pair_t *pairs=realloc(table->pairs,(table->size+1)*sizeof(toml_pair_t));
+    if(!pairs){
+        confc_log_err("toml_add_pair: realloc %zu bytes failed: %s\n",(size_t)((table->size+1)*sizeof(toml_pair_t)),strerror(errno));
+        free(key);
+        return;
+    }
+    table->pairs=pairs;
+    memmove(&table->pairs[l+1],&table->pairs[l],(table->size-l)*sizeof(toml_pair_t));
+    table->pairs[l].key=key;
+    table->pairs[l].value=pair->value;
+    table->size++;
+}
+
+
+toml_type_t *toml_lookup(toml_t *file,const char *table,size_t i,const char *key){
+    if(file==NULL||key==NULL){
+        return NULL;
+    }
+
+    if(table==NULL||table[0]=='\0'){
+        /* 根层的键放在名字为 "" 的表里（和 ini 的根 section 一致） */
+        toml_type_t *root=toml_lookup_table(file,"");
+        if(root!=NULL&&*root==TOML_TABLE){
+            return toml_lookup_from_table((toml_table_t *)root,key);
+        }
+        return NULL;
+    }
+
+    toml_type_t *found=toml_lookup_table(file,table);
+    if(found==NULL){
+        return NULL;
+    }
+    /* 每个值结构体都以 toml_type_t tp 开头，解引用即得类型 */
+    toml_type_t tp=*found;
+    if(tp==TOML_TABLE){
+        return toml_lookup_from_table((toml_table_t *)found,key);
+    }
+    if(tp==TOML_ARRAY_OF_TABLES){
+        return toml_lookup_from_array_of_tables((toml_array_of_tables_t *)found,i,key);
+    }
+    return NULL;
+}
+
+toml_type_t *toml_lookup_table(toml_t *file,const char *name){
+    if(file==NULL||name==NULL||file->size==0){
+        return NULL;
+    }
+
+    size_t l=0,r=file->size-1;
+    while(l<=r&&r!=(size_t)-1){
+        size_t mid=l+(r-l)/2;
+        int res=strcmp(file->pairs[mid].key,name);
+        if(res==0){
+            return file->pairs[mid].value;
+        }else if(res<0){
+            l=mid+1;
+        }else{
+            r=mid-1;
+        }
+    }
+    return NULL;
+}
+
+toml_type_t *toml_lookup_from_table(toml_table_t *table,const char *key){
+    if(table==NULL||key==NULL||table->size==0){
+        return NULL;
+    }
+
+    size_t l=0,r=table->size-1;
+    while(l<=r&&r!=(size_t)-1){
+        size_t mid=l+(r-l)/2;
+        int res=strcmp(table->pairs[mid].key,key);
+        if(res==0){
+            return table->pairs[mid].value;
+        }else if(res<0){
+            l=mid+1;
+        }else{
+            r=mid-1;
+        }
+    }
+    return NULL;
+}
+
+toml_type_t *toml_lookup_from_array_of_tables(toml_array_of_tables_t *table,size_t i,const char *key){
+    if(table==NULL||key==NULL||i>=table->size||table->table==NULL){
+        return NULL;
+    }
+
+    toml_table_t item={.tp=TOML_TABLE,.name=table->name,.pairs=table->table[i].pairs,.size=table->table[i].size};
+    return toml_lookup_from_table(&item,key);
+}
+
+
+
 #ifndef DARRAY_H
 
 int da_init(void *array){
@@ -906,7 +2208,7 @@ int da_add(size_t tp_size,void *array,const void *buf){
     if(arr->size+1>=arr->real){
         void *p=realloc(arr->arr,(arr->real*3/2+1)*tp_size);
         if(!p){
-            ini_log_err("da_add: realloc %zu bytes failed: %s\n",(size_t)((arr->real*3/2+1)*tp_size),strerror(errno));
+            confc_log_err("da_add: realloc %zu bytes failed: %s\n",(size_t)((arr->real*3/2+1)*tp_size),strerror(errno));
             return 127;
         }
         arr->arr=p;
@@ -926,7 +2228,7 @@ int da_clear(void *array){
 
 #endif
 
-#undef ini_log_err
+#undef confc_log_err
 
 #endif
 
